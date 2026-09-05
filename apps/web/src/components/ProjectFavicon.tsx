@@ -165,7 +165,7 @@ export function ProjectFavicon(input: {
   );
 }
 
-export function useProjectFaviconAsset(input: {
+function useProjectFaviconAsset(input: {
   readonly environmentId: EnvironmentId;
   readonly cwd: string;
   readonly faviconPath?: string | null | undefined;
