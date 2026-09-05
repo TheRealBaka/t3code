@@ -303,7 +303,7 @@ describe("createEnvironmentThreadStateAtoms", () => {
         const h = yield* makeHarness({ connected: true, httpNone });
         const unmount = h.registry.mount(h.stateAtom);
         const first = yield* Queue.take(h.subscriptions);
-        const error = new Error("incompatible thread snapshot");
+        const error = new Error("SYNTHETIC_RAW_DEFECT_SHOULD_NOT_REACH_THREAD_UI");
         yield* Queue.failCause(
           first.events,
           kind === "fatal"
@@ -323,7 +323,7 @@ describe("createEnvironmentThreadStateAtoms", () => {
         yield* TestClock.adjust("1 second");
         const failed = h.registry.get(h.stateAtom);
         expect(failed.status).toBe(httpNone ? "empty" : "cached");
-        expect(Option.getOrThrow(failed.error)).toContain(error.message);
+        expect(failed.error).toEqual(Option.some("Could not synchronize the thread."));
         expect(failed.data).toEqual(httpNone ? Option.none() : Option.some(THREAD));
         expect(h.counts().opened).toBe(1);
         expect(h.counts().active).toBe(0);
@@ -458,7 +458,11 @@ describe("createEnvironmentThreadStateAtoms", () => {
     ({ kind, deleted }) =>
       Effect.gen(function* () {
         const burst = yield* Deferred.make<void>();
-        const error = new Error("buffered thread failure");
+        const error = new Error(
+          kind === "domain"
+            ? "buffered thread failure"
+            : "SYNTHETIC_BUFFERED_DEFECT_SHOULD_NOT_REACH_THREAD_UI",
+        );
         const items: OrchestrationThreadStreamItem[] = [
           { kind: "snapshot", snapshot: SNAPSHOT },
           { kind: "synchronized" },
@@ -555,7 +559,9 @@ describe("createEnvironmentThreadStateAtoms", () => {
             return;
           }
           expect(Option.getOrThrow(final.data).title).toBe("Buffer drained");
-          expect(Option.getOrThrow(final.error)).toContain(error.message);
+          expect(final.error).toEqual(
+            Option.some(kind === "domain" ? error.message : "Could not synchronize the thread."),
+          );
           expect(final.status).toBe("cached");
         }).pipe(
           Effect.provideService(EnvironmentSupervisor, h.supervisor),
