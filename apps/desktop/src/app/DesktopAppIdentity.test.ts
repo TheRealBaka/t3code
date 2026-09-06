@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 
 import type * as Electron from "electron";
@@ -88,6 +89,7 @@ const makeEnvironmentLayer = (overrides: TestEnvironmentInput = {}) => {
     Layer.provide(
       Layer.mergeAll(
         NodeServices.layer,
+        Path.layer,
         DesktopConfig.layerTest({
           ...env,
         }),
@@ -109,6 +111,7 @@ const withIdentity = <A, E, R>(
     readonly calls?: ElectronAppCalls;
     readonly environment?: TestEnvironmentInput;
     readonly legacyPathExists?: boolean;
+    readonly officialPathExists?: boolean;
     readonly legacyPathProbeError?: PlatformError.PlatformError;
     readonly packageJson?: string;
     readonly pngIconPath?: Option.Option<string>;
@@ -129,7 +132,8 @@ const withIdentity = <A, E, R>(
               input.legacyPathProbeError
                 ? Effect.fail(input.legacyPathProbeError)
                 : Effect.succeed(
-                    input.legacyPathExists === true && path.includes("T3 Code (Alpha)"),
+                    (input.legacyPathExists === true && path.endsWith("T3 Code Preview")) ||
+                      (input.officialPathExists === true && path.endsWith("T3 Code (Alpha)")),
                   ),
             readFileString: () =>
               Effect.succeed(input.packageJson ?? '{"t3codeCommitHash":"abcdef1234567890"}'),
@@ -144,20 +148,33 @@ const withIdentity = <A, E, R>(
 };
 
 describe("DesktopAppIdentity", () => {
+  it.effect("does not adopt an existing official T3 profile", () =>
+    withIdentity(
+      Effect.gen(function* () {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
+        assert.equal(
+          yield* identity.resolveUserDataPath,
+          "/Users/alice/Library/Application Support/t3code-preview",
+        );
+      }),
+      { officialPathExists: true },
+    ),
+  );
+
   it.effect("keeps using the legacy userData path when it already exists", () =>
     withIdentity(
       Effect.gen(function* () {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         const userDataPath = yield* identity.resolveUserDataPath;
 
-        assert.equal(userDataPath, "/Users/alice/Library/Application Support/T3 Code (Alpha)");
+        assert.equal(userDataPath, "/Users/alice/Library/Application Support/T3 Code Preview");
       }),
       { legacyPathExists: true },
     ),
   );
 
   it.effect("preserves failures while inspecting the legacy userData path", () => {
-    const legacyPath = "/Users/alice/Library/Application Support/T3 Code (Alpha)";
+    const legacyPath = "/Users/alice/Library/Application Support/T3 Code Preview";
     const cause = PlatformError.systemError({
       _tag: "PermissionDenied",
       module: "FileSystem",
@@ -195,8 +212,8 @@ describe("DesktopAppIdentity", () => {
         const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
         yield* identity.configure;
 
-        assert.deepEqual(calls.setName, ["T3 Code (Alpha)"]);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "T3 Code (Alpha)");
+        assert.deepEqual(calls.setName, ["T3 Code Preview"]);
+        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "T3 Code Preview");
         assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, "1.2.3");
         assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
         // Packaged: the bundle's own icon stands, so a custom one the user

@@ -38,3 +38,10 @@ node_modules/
 *.log
 .env*
 !.env.example
+
+# Personal installation notes, patch helpers, and recordings (not release inputs).
+/README-PI.md
+/apply-pi-server-and-start-t3code.cmd
+/restore-original-server-and-start-t3code.cmd
+/pi-harness-test.mp4
+/tools/

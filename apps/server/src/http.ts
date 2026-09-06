@@ -48,7 +48,12 @@ import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./ht
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
+const DESKTOP_RENDERER_ORIGINS = [
+  "t3code://app",
+  "t3code-dev://app",
+  "t3code-preview://app",
+  "t3code-preview-dev://app",
+];
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
 // Types a browser may render as a document if a proxy strips the disposition

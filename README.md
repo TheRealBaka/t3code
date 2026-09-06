@@ -1,120 +1,45 @@
-# T3 Code
+# T3 Code Preview
 
-T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
+An independent fork of [T3 Code](https://github.com/pingdotgg/t3code), based on v0.0.38, with Pi provider support and extended chat features. Not an official T3 release.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, and OpenCode. If they're set up on your computer, T3 Code can control them.
+## Download and install
 
-## "Wait, what are you selling me?"
+**[Download from GitHub Releases](https://github.com/TheRealBaka/t3code/releases)**
 
-Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
+Choose the newest **T3 Code Preview** prerelease and download the `arm64.dmg` file under **Assets**. The initial target is **Apple Silicon Macs**, including M1, M2, M3, and later chips. Intel Macs, Windows, Linux, and mobile are not part of this initial packaged release.
 
-We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
+Open the DMG, drag **T3 Code Preview** into **Applications**, then open it from Applications. You do not need the official T3 app, Git, Node.js, or a compiler just to install the desktop app. Your coding provider may have its own prerequisites.
 
-## Installation
+**The app is unsigned and not notarized.** macOS may require an explicit approval before it opens. Follow the [installation and troubleshooting guide](docs/user/preview-install.md).
 
-> [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, Grok Build and OpenCode. Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
-> - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
+Install and sign into at least one coding provider on your Mac, then enable it in **Settings → Providers**. Provider subscriptions and API access are not included.
 
-### Try it out (install-free)
+> `npx t3@latest`, the official T3 website, and the Homebrew `t3-code` cask install upstream T3, **not this fork**. Do not patch an official app with files from this repository.
 
-The easiest way to test T3 Code is to run the server in your terminal (requires Node.js 22.16+, 23.11+, or 24.10+):
+## What's included
 
-```bash
-npx t3@latest
-```
+- Pi Agent provider integration, with thinking levels, tool output, and usage reporting.
+- Math rendering and inline workspace videos in web/desktop chat.
+- Comments on highlighted assistant text, attached to the composer.
+- Claude side chats with model/effort controls, attachments, and selection context.
+- Claude skill discovery and a subscription usage dialog.
 
-This will launch T3 Code's backend on your machine as well as the local web app to control your agents.
+Side chats currently require Claude. Pi currently supports Full Access only. The Claude subscription usage dialog does not yet read macOS Keychain credentials; normal Claude conversations do not depend on that dialog.
 
-Tip: Use `npx t3@latest --help` for the full CLI reference.
+## Separate from official T3
 
-### Desktop app
+The app installs as **T3 Code Preview** and uses its own local data directory, `~/.t3-preview`. It does not automatically import official T3 conversations or settings. Avoid setting `T3CODE_HOME` to an official installation's data directory.
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+Updates are manual: download a newer preview DMG and replace the application while it is closed. Your preview data stays in place. Official T3 auto-updates cannot replace this build.
 
-#### Windows (`winget`)
+T3 Connect cloud login/relay is not configured in preview downloads. This does not affect local coding-provider login. For remote work, see the [connection limitations](docs/user/preview-install.md#remote-connections).
 
-```bash
-winget install T3Tools.T3Code
-```
+## Development and releases
 
-#### macOS (Homebrew)
+The `release/preview` branch is the release source. GitHub Actions builds the Apple Silicon DMG and publishes a prerelease after focused checks pass. See the [release runbook](docs/operations/preview-releases.md).
 
-```bash
-brew install --cask t3-code
-```
+## Credits and license
 
-#### Arch Linux (AUR)
+T3 Code is built by the upstream maintainers and contributors. The Pi provider integration derives from [PR #9648](https://github.com/pingdotgg/t3code/pull/9648) by NachikethReddyY; math rendering incorporates work from [PR #9838](https://github.com/pingdotgg/t3code/pull/9838).
 
-Stable:
-
-```bash
-yay -S t3code-bin
-```
-
-Nightly:
-
-```bash
-yay -S t3code-nightly-bin
-```
-
-The AUR packaging is maintained in this repository under [`packaging/aur`](./packaging/aur).
-
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
-
-## Documentation
-
-Full docs live in [docs/](./docs). There's no docs site yet.
-
-- [Install and first run](./docs/user/install.md)
-- [Permission modes](./docs/user/permission-modes.md)
-- [Keyboard shortcuts](./docs/user/keybindings.md)
-- [Customize a project icon](./docs/user/project-settings.md)
-- [Remote access from a phone or another machine](./docs/user/remote-access.md)
-- [Keeping app and server in sync](./docs/user/updating.md)
-- [Source control integrations](./docs/user/source-control.md)
-- Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
-- Linux: [run T3 Code as a background service](./docs/user/background-service.md)
-
-Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
-
-## If you REALLY want to contribute still.... read this first
-
-### Install `vp`
-
-T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
-
-#### macOS / Linux
-
-```bash
-curl -fsSL https://vite.plus | bash
-```
-
-#### Windows
-
-```bash
-irm https://vite.plus/ps1 | iex
-```
-
-Checkout their getting started guide for more information: https://viteplus.dev/guide/
-
-### Install dependencies
-
-```bash
-vp i
-```
-
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
-
-Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
-
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+This fork retains the upstream [MIT license](LICENSE). For the official project, documentation, and contribution policies, visit [pingdotgg/t3code](https://github.com/pingdotgg/t3code).

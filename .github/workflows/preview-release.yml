@@ -1,0 +1,149 @@
+name: Preview desktop release
+
+on:
+  push:
+    branches: [release/preview]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    if: github.repository == 'TheRealBaka/t3code' && github.ref == 'refs/heads/release/preview'
+    # Standard GitHub-hosted Apple Silicon runner, not a paid/larger runner.
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: false
+
+      - name: Install locked desktop dependencies
+        run: vp install --frozen-lockfile --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Check desktop and feature behavior
+        run: |
+          vp test run \
+            apps/desktop/src/app/DesktopEnvironment.test.ts \
+            apps/desktop/src/app/DesktopAppIdentity.test.ts \
+            apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts \
+            apps/desktop/src/app/DesktopClerk.test.ts \
+            apps/desktop/src/electron/ElectronProtocol.test.ts \
+            scripts/build-desktop-artifact.test.ts \
+            apps/server/src/provider/Drivers/PiAgentDriver.test.ts \
+            apps/server/src/provider/Drivers/PiSkillDispatch.test.ts \
+            apps/server/src/provider/Layers/PiAgentAdapter.test.ts \
+            apps/server/src/provider/Layers/PiAgentProvider.test.ts \
+            apps/server/src/provider/pi/PiRpcClient.test.ts \
+            apps/server/src/provider/pi/PiRpcProtocol.test.ts \
+            apps/server/src/sideChat/SideChatCoordinator.test.ts \
+            apps/server/src/usage/ClaudeUsageLimits.test.ts \
+            apps/server/src/provider/Drivers/ClaudeSkills.test.ts \
+            apps/web/src/components/usage/usageLimitsFormat.test.ts \
+            packages/client-runtime/src/runtimeModeOptions.test.ts
+          vp test run apps/server/src/server.test.ts -t 'allows credentialed preflights from t3code-preview'
+
+      - name: Typecheck release surfaces
+        run: |
+          vp run --filter @t3tools/desktop typecheck
+          vp run --filter @t3tools/web typecheck
+          vp run --filter t3 typecheck
+
+      - name: Stamp preview version
+        id: version
+        run: |
+          version="0.0.38-preview.${GITHUB_RUN_NUMBER}"
+          node scripts/update-release-package-versions.ts "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build unsigned Apple Silicon DMG
+        env:
+          T3CODE_DESKTOP_SIGNED: "false"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          PREVIEW_VERSION: ${{ steps.version.outputs.version }}
+        # No .env.example copy: cloud login and relay are intentionally unconfigured.
+        # Preview versions omit the updater feed; releases are installed manually.
+        run: |
+          vp run dist:desktop:artifact \
+            --platform mac --target dmg --arch arm64 \
+            --build-version "$PREVIEW_VERSION" --verbose
+
+      - name: Inspect bundle and checksum download
+        env:
+          PREVIEW_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          dmg="T3-Code-Preview-${PREVIEW_VERSION}-arm64.dmg"
+          test -s "release/$dmg"
+          mount="$RUNNER_TEMP/preview-dmg"
+          mkdir -p "$mount"
+          hdiutil attach "release/$dmg" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          app="$mount/T3 Code Preview.app"
+          test -d "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "io.github.therealbaka.t3code.preview"
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          lipo -verify_arch arm64 "$app/Contents/MacOS/$executable"
+          test ! -e "$app/Contents/Resources/app-update.yml"
+          ELECTRON_RUN_AS_NODE=1 T3CODE_HOME="$RUNNER_TEMP/preview-smoke" \
+            "$app/Contents/MacOS/$executable" \
+            "$app/Contents/Resources/app.asar/apps/server/dist/bin.mjs" --help
+          cd release
+          shasum -a 256 "$dmg" > SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-arm64-preview
+          path: |
+            release/*.dmg
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: macos-arm64-preview
+          path: downloads
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.macos.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag="preview-${VERSION}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" downloads/* --clobber
+          else
+            gh release create "$tag" downloads/* \
+              --target "$GITHUB_SHA" \
+              --title "T3 Code Preview ${VERSION}" \
+              --notes-file docs/user/preview-release-notes.md \
+              --prerelease --latest=false
+          fi

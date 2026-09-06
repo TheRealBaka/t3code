@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
@@ -26,7 +27,9 @@ const makeEnvironmentLayer = (
   DesktopEnvironment.layer({
     ...defaultInput,
     ...overrides,
-  }).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest(env))));
+  }).pipe(
+    Layer.provide(Layer.mergeAll(NodeServices.layer, Path.layer, DesktopConfig.layerTest(env))),
+  );
 
 const makeEnvironment = (
   overrides: Partial<DesktopEnvironment.MakeDesktopEnvironmentInput> = {},
@@ -68,8 +71,8 @@ describe("DesktopEnvironment", () => {
       assert.equal(environment.serverRoot, "/repo");
       assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
       assert.equal(environment.backendCwd, "/repo");
-      assert.equal(environment.appUserModelId, "com.t3tools.t3code.dev");
-      assert.equal(environment.linuxWmClass, "t3code-dev");
+      assert.equal(environment.appUserModelId, "io.github.therealbaka.t3code.preview.dev");
+      assert.equal(environment.linuxWmClass, "t3code-preview-dev");
       assert.deepEqual(
         Option.map(environment.devServerUrl, (url) => url.href),
         Option.some("http://localhost:5173/"),
@@ -125,8 +128,12 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(development.stateDir, "/Users/alice/.t3-preview/dev");
+      assert.equal(production.stateDir, "/Users/alice/.t3-preview/userdata");
+      assert.equal(production.userDataDirName, "t3code-preview");
+      assert.equal(production.legacyUserDataDirName, "T3 Code Preview");
+      assert.equal(production.displayName, "T3 Code Preview");
+      assert.equal(production.appUserModelId, "io.github.therealbaka.t3code.preview");
     }),
   );
 
