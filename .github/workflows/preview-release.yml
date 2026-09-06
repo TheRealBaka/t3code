@@ -106,7 +106,7 @@ jobs:
           test -d "$app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "io.github.therealbaka.t3code.preview"
           executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
-          lipo -verify_arch arm64 "$app/Contents/MacOS/$executable"
+          lipo "$app/Contents/MacOS/$executable" -verify_arch arm64
           test ! -e "$app/Contents/Resources/app-update.yml"
           ELECTRON_RUN_AS_NODE=1 T3CODE_HOME="$RUNNER_TEMP/preview-smoke" \
             "$app/Contents/MacOS/$executable" \
