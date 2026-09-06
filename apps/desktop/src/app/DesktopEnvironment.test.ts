@@ -132,7 +132,7 @@ describe("DesktopEnvironment", () => {
       assert.equal(production.stateDir, "/Users/alice/.t3-preview/userdata");
       assert.equal(production.userDataDirName, "t3code-preview");
       assert.equal(production.legacyUserDataDirName, "T3 Code Preview");
-      assert.equal(production.displayName, "T3 Code Preview");
+      assert.equal(production.displayName, "T3 Code++");
       assert.equal(production.appUserModelId, "io.github.therealbaka.t3code.preview");
     }),
   );

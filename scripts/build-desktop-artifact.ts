@@ -2143,7 +2143,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
-    artifactName: "T3-Code-Preview-${version}-${arch}.${ext}",
+    artifactName: "T3-Code-PlusPlus-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [...DESKTOP_FILE_EXCLUSIONS, ...(platform === "mac" ? MAC_FILE_EXCLUSIONS : [])],
     directories: {
@@ -2183,7 +2183,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "public.app-category.developer-tools",
       protocols: [
         {
-          name: "T3 Code Preview",
+          name: "T3 Code++",
           schemes: ["t3code-preview", "t3code-preview-dev"],
         },
       ],
@@ -2231,7 +2231,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // fork-specific OAuth callbacks to the app.
       protocols: [
         {
-          name: "T3 Code Preview",
+          name: "T3 Code++",
           schemes: ["t3code-preview", "t3code-preview-dev"],
         },
       ],
