@@ -1613,7 +1613,17 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThread) {
+  const activeThreadInstanceId =
+    activeThread?.session?.providerInstanceId ?? activeThread?.modelSelection.instanceId ?? null;
+  const activeThreadDriverKind =
+    activeThread && activeThreadInstanceId !== null
+      ? (providerEntryByEnvironmentAndInstanceId.get(
+          `${activeThread.environmentId}:${activeThreadInstanceId}`,
+        )?.driverKind ?? null)
+      : null;
+
+  // Side chats fork the Claude session; other providers have no fork to open.
+  if (activeThread && activeThreadDriverKind === "claudeAgent") {
     actionItems.push({
       kind: "action",
       value: "action:open-side-chat",
@@ -1630,12 +1640,7 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (activeThread) {
-    const usageInstanceId =
-      activeThread.session?.providerInstanceId ?? activeThread.modelSelection.instanceId;
-    const usageDriverKind =
-      providerEntryByEnvironmentAndInstanceId.get(
-        `${activeThread.environmentId}:${usageInstanceId}`,
-      )?.driverKind ?? null;
+    const usageDriverKind = activeThreadDriverKind;
     // Without a resolved driver the card cannot say whether a plan quota
     // applies, so the entry stays out rather than opening onto a guess.
     if (usageDriverKind !== null) {
@@ -1656,9 +1661,11 @@ function OpenCommandPaletteDialog(props: {
         description: "Plan limits and token spend for this machine",
         icon: <GaugeIcon className={ITEM_ICON_CLASS} />,
         run: async () => {
-          useUsageCardStore
-            .getState()
-            .open({ environmentId: activeThread.environmentId, provider: usageDriverKind });
+          useUsageCardStore.getState().open({
+            environmentId: activeThread.environmentId,
+            provider: usageDriverKind,
+            model: activeThread.modelSelection.model,
+          });
         },
       });
     }

@@ -2366,6 +2366,9 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider,
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
+  // Side chats fork the Claude session; other providers have no fork to open,
+  // so every way in (header, panel tab, /btw, palette) hides together.
+  const sideChatAvailable = isServerThread && selectedProvider === "claudeAgent";
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const latestCheckpointCompletedAt = activeThread?.checkpoints.at(-1)?.completedAt ?? null;
@@ -5627,7 +5630,7 @@ function ChatViewContent(props: ChatViewProps) {
     // `/btw` never reaches the agent, and never waits on it either: the side
     // chat is most useful while a turn is running, so this runs before the
     // busy and connection gates below.
-    if (!directAnnotation && isServerThread && activeThreadRef) {
+    if (!directAnnotation && sideChatAvailable && activeThreadRef) {
       const sideChatCommand = parseSideChatComposerCommand(promptRef.current);
       if (sideChatCommand) {
         // Only the prompt goes: attachments and contexts the user staged are
@@ -5645,7 +5648,11 @@ function ChatViewContent(props: ChatViewProps) {
       promptRef.current = "";
       setComposerDraftPrompt(composerDraftTarget, "");
       composerRef.current?.resetCursorState();
-      useUsageCardStore.getState().open({ environmentId, provider: selectedProvider });
+      useUsageCardStore.getState().open({
+        environmentId,
+        provider: selectedProvider,
+        model: composerRef.current?.getSendContext().selectedModel ?? null,
+      });
       return;
     }
     const notifyDirectAnnotationAttached = () => {
@@ -7288,6 +7295,7 @@ function ChatViewContent(props: ChatViewProps) {
             gitCwd={gitCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
             onOpenSideChat={addSideChatSurface}
+            sideChatAvailable={sideChatAvailable}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
@@ -7692,7 +7700,7 @@ function ChatViewContent(props: ChatViewProps) {
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           agentsAvailable
-          sideChatAvailable={isServerThread}
+          sideChatAvailable={sideChatAvailable}
           pullRequestStatuses={pullRequestTabStatuses}
           liveAgentCount={agentPanelModel.liveCount}
         >
@@ -7734,7 +7742,7 @@ function ChatViewContent(props: ChatViewProps) {
             filesAvailable={activeProject !== null}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             agentsAvailable
-            sideChatAvailable={isServerThread}
+            sideChatAvailable={sideChatAvailable}
             pullRequestStatuses={pullRequestTabStatuses}
             liveAgentCount={agentPanelModel.liveCount}
           >

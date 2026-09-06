@@ -1227,13 +1227,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: "Switch response model for this thread",
         },
-        {
-          id: "slash:btw",
-          type: "slash-command",
-          command: "btw",
-          label: "/btw",
-          description: "Open a side chat about this thread",
-        },
+        // Side chats fork the Claude session; other providers have no fork to open.
+        ...(selectedProvider === "claudeAgent"
+          ? ([
+              {
+                id: "slash:btw",
+                type: "slash-command",
+                command: "btw",
+                label: "/btw",
+                description: "Open a side chat about this thread",
+              },
+            ] as const)
+          : []),
         {
           id: "slash:usage",
           type: "slash-command",

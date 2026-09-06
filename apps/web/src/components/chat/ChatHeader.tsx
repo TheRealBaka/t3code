@@ -66,6 +66,8 @@ interface ChatHeaderProps {
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
   onOpenSideChat: () => void;
+  /** Side chats fork the provider session, which only Claude supports today. */
+  sideChatAvailable: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -135,6 +137,7 @@ export const ChatHeader = memo(function ChatHeader({
   onOpenPullRequest,
   onNewThreadInProject,
   onOpenSideChat,
+  sideChatAvailable,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -381,7 +384,7 @@ export const ChatHeader = memo(function ChatHeader({
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
-        {isServerThread && (
+        {isServerThread && sideChatAvailable && (
           <Tooltip>
             <TooltipTrigger
               render={
