@@ -100,6 +100,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import * as SideChatCoordinator from "./sideChat/SideChatCoordinator.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -554,6 +555,7 @@ const makeWsRpcLayer = (
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const usage = yield* UsageService.UsageService;
       const relayClient = yield* RelayClient.RelayClient;
+      const sideChatCoordinator = yield* SideChatCoordinator.SideChatCoordinator;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -1754,6 +1756,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetUsageSummary, usage.readSummary(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.usageGetClaudeLimits]: (_input) =>
+          observeRpcEffect(WS_METHODS.usageGetClaudeLimits, usage.readClaudeLimits, {
+            "rpc.aggregate": "usage",
+          }),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRetryResourceTelemetry, resourceTelemetry.retry, {
             "rpc.aggregate": "server",
@@ -1789,6 +1795,14 @@ const makeWsRpcLayer = (
         [WS_METHODS.serverGetBackgroundPolicy]: (_input) =>
           observeRpcEffect(WS_METHODS.serverGetBackgroundPolicy, backgroundPolicy.snapshot, {
             "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.sideChatAsk]: (input) =>
+          observeRpcStream(WS_METHODS.sideChatAsk, sideChatCoordinator.ask(input), {
+            "rpc.aggregate": "side-chat",
+          }),
+        [WS_METHODS.sideChatClose]: (input) =>
+          observeRpcEffect(WS_METHODS.sideChatClose, sideChatCoordinator.close(input), {
+            "rpc.aggregate": "side-chat",
           }),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.cloudGetRelayClientStatus, relayClient.resolve, {

@@ -128,6 +128,7 @@ import {
   type ParsedPreviewAnnotation,
 } from "~/lib/previewAnnotation";
 import { cn } from "~/lib/utils";
+import { AssistantReplyComments } from "./AssistantReplyComments";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
@@ -1256,10 +1257,19 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const replyContainerRef = useRef<HTMLDivElement | null>(null);
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
+      <div ref={replyContainerRef} className="relative min-w-0 px-1 py-0.5">
+        {ctx.threadRef && !row.message.streaming ? (
+          <AssistantReplyComments
+            messageId={row.message.id}
+            threadRef={ctx.threadRef}
+            containerRef={replyContainerRef}
+            messageText={messageText}
+          />
+        ) : null}
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}

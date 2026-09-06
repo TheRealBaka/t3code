@@ -7,6 +7,7 @@ import {
   COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
 } from "../composerInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { isChatReplyComment, useReplyCommentFocusStore } from "~/chatReplyComments";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { cn } from "~/lib/utils";
 
@@ -21,16 +22,33 @@ export function ComposerPendingReviewComments({
   onRemove,
   className,
 }: ComposerPendingReviewCommentsProps) {
+  const focusReplyComment = useReplyCommentFocusStore((store) => store.focus);
   if (comments.length === 0) return null;
 
   return (
     <div className={cn("flex flex-wrap gap-1.5", className)}>
       {comments.map((comment) => {
-        const label = `${comment.filePath} ${comment.rangeLabel}`;
+        const label = isChatReplyComment(comment)
+          ? comment.rangeLabel
+          : `${comment.filePath} ${comment.rangeLabel}`;
         const chip = (
           <span key={comment.id} className={cn(COMPOSER_INLINE_CHIP_CLASS_NAME, "pr-1")}>
             <MessageCircle className={cn(COMPOSER_INLINE_CHIP_ICON_CLASS_NAME, "size-3.5")} />
-            <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{label}</span>
+            {isChatReplyComment(comment) ? (
+              <button
+                type="button"
+                className={cn(COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME, "cursor-pointer")}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  focusReplyComment(comment.id);
+                }}
+              >
+                {label}
+              </button>
+            ) : (
+              <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{label}</span>
+            )}
             <button
               type="button"
               aria-label={`Remove comment on ${label}`}

@@ -697,6 +697,14 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetUsageSummary,
       staleTimeMs: 60_000,
     }),
+    // Subscription quota, not the transcript scan above. One live HTTP call to
+    // Claude's account service, so it is cached for as long as the server's own
+    // read is.
+    claudeUsageLimits: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:claude-usage-limits",
+      tag: WS_METHODS.usageGetClaudeLimits,
+      staleTimeMs: 30_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",

@@ -3,6 +3,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
+import { SideChatAskInput, SideChatCloseInput, SideChatError, SideChatEvent } from "./sideChat.ts";
 import {
   AuthAccessStreamError,
   AuthAccessStreamEvent,
@@ -192,7 +193,13 @@ import {
   ResourceTelemetryRetryResult,
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
-import { UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
+import {
+  ClaudeUsageError,
+  ClaudeUsageLimits,
+  UsageReadError,
+  UsageSummary,
+  UsageSummaryInput,
+} from "./usage.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   SourceControlCloneRepositoryInput,
@@ -291,6 +298,14 @@ export const WS_METHODS = {
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
+
+  // Claude subscription quota, read live from the account service rather than
+  // from transcripts. See `usage.getUsageSummary` for token and cost totals.
+  usageGetClaudeLimits: "usage.getClaudeLimits",
+
+  // Side chats (ephemeral forks of a thread's provider conversation)
+  sideChatAsk: "sideChat.ask",
+  sideChatClose: "sideChat.close",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -453,10 +468,29 @@ export const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSumm
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
 });
 
+export const WsUsageGetClaudeLimitsRpc = Rpc.make(WS_METHODS.usageGetClaudeLimits, {
+  payload: Schema.Struct({}),
+  success: ClaudeUsageLimits,
+  error: Schema.Union([EnvironmentAuthorizationError, ClaudeUsageError]),
+});
+
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsSideChatAskRpc = Rpc.make(WS_METHODS.sideChatAsk, {
+  payload: SideChatAskInput,
+  success: SideChatEvent,
+  error: Schema.Union([SideChatError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+export const WsSideChatCloseRpc = Rpc.make(WS_METHODS.sideChatClose, {
+  payload: SideChatCloseInput,
+  success: Schema.Void,
+  error: Schema.Union([SideChatError, EnvironmentAuthorizationError]),
 });
 
 export const WsCloudGetRelayClientStatusRpc = Rpc.make(WS_METHODS.cloudGetRelayClientStatus, {
@@ -1044,7 +1078,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
+  WsUsageGetClaudeLimitsRpc,
   WsServerSignalProcessRpc,
+  WsSideChatAskRpc,
+  WsSideChatCloseRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,

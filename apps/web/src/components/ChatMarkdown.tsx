@@ -64,10 +64,12 @@ import React, {
 import type { Components, Options as ReactMarkdownOptions } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import { remarkGithubAlerts } from "../markdown-github-alerts";
 import {
   artifactTemplateFromHastProperties,
@@ -113,7 +115,9 @@ import {
   serializeTableElementToCsv,
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
+import { isWorkspaceVideoPreviewPath } from "@t3tools/shared/filePreview";
 import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
+import { normalizeLatexDelimiters } from "../markdown-latex";
 import {
   extractMarkdownLinkHrefs,
   isWindowsDrivePathHref,
@@ -375,6 +379,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
 
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
+  remarkMath,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkCodexDirectives,
@@ -384,6 +389,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS = [
 
 const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGfm,
+  remarkMath,
   remarkGithubAlerts,
   remarkNormalizeListItemIndentation,
   remarkCodexDirectives,
@@ -392,10 +398,15 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkNormalizeLinksAndTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
-const CHAT_MARKDOWN_REHYPE_PLUGINS = [
+const CHAT_MARKDOWN_REHYPE_PLUGINS = [rehypeKatex] satisfies NonNullable<
+  ReactMarkdownOptions["rehypePlugins"]
+>;
+
+const CHAT_MARKDOWN_RAW_HTML_REHYPE_PLUGINS = [
   rehypeRaw,
   rehypePreserveImageSourceMeta,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
+  rehypeKatex,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
 /** GitHub's own five alert kinds, in its colors: the glyph names the urgency, the title says it. */
@@ -1218,6 +1229,70 @@ function ChatMarkdownImageFallback(props: {
     </span>
   );
 }
+
+/** Environment-hosted videos play through the same signed asset URL as images. */
+const ChatMarkdownAssetVideo = memo(function ChatMarkdownAssetVideo(props: {
+  readonly environmentId: EnvironmentId;
+  readonly resource: Extract<AssetResource, { readonly _tag: "workspace-file" }>;
+  readonly alt: string;
+  readonly copyMarkdown?: string;
+}) {
+  const assetUrl = useAssetUrlState(props.environmentId, props.resource);
+  const signedUrl = assetUrl._tag === "Success" ? assetUrl.url : null;
+  // The desktop shell's CSP only allows media from blob: and its own scheme,
+  // so the bytes are fetched (connect-src allows http) and played from a blob.
+  const [playback, setPlayback] = useState<{ source: string; url: string | null } | null>(null);
+  useEffect(() => {
+    if (!signedUrl) return;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    fetch(signedUrl, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.blob();
+      })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        setPlayback({ source: signedUrl, url: objectUrl });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPlayback({ source: signedUrl, url: null });
+      });
+    return () => {
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [signedUrl]);
+  const current = playback !== null && playback.source === signedUrl ? playback : null;
+  if (assetUrl._tag === "Failure" || (current !== null && current.url === null)) {
+    return <ChatMarkdownImageFallback alt={props.alt} copyMarkdown={props.copyMarkdown} />;
+  }
+  if (current === null || current.url === null) {
+    return (
+      <span
+        data-markdown-copy={props.copyMarkdown}
+        role="status"
+        aria-label="Loading video"
+        className={cn(
+          CHAT_MARKDOWN_WORKSPACE_IMAGE_LAYOUT_CLASS_NAME,
+          "aspect-video w-64 max-w-full rounded-lg bg-muted/60",
+          CHAT_MARKDOWN_IMAGE_BOUNDS_CLASS_NAME,
+        )}
+      />
+    );
+  }
+  return (
+    <video
+      src={current.url}
+      controls
+      preload="metadata"
+      playsInline
+      title={props.alt}
+      data-markdown-copy={props.copyMarkdown}
+      className={CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME}
+    />
+  );
+});
 
 /** Environment-hosted images load through a signed asset URL. */
 export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props: {
@@ -2372,6 +2447,24 @@ function ChatMarkdown({
             />
           );
         }
+        if (
+          imageSource._tag === "WorkspaceFile" &&
+          threadRef &&
+          isWorkspaceVideoPreviewPath(imageSource.path)
+        ) {
+          return (
+            <ChatMarkdownAssetVideo
+              environmentId={threadRef.environmentId}
+              resource={{
+                _tag: "workspace-file",
+                threadId: threadRef.threadId,
+                path: imageSource.path,
+              }}
+              alt={altText}
+              copyMarkdown={copyMarkdown}
+            />
+          );
+        }
         if (imageSource._tag === "WorkspaceFile" && threadRef) {
           return (
             <ChatMarkdownAssetImage
@@ -2462,6 +2555,7 @@ function ChatMarkdown({
     ],
     [extraRemarkPlugins, lineBreaks],
   );
+  const normalizedText = useMemo(() => normalizeLatexDelimiters(text), [text]);
 
   // react-markdown converts unparsed HTML nodes to text when skipHtml is false.
   // Keep that behavior explicit because literal mode depends on escaping the
@@ -2476,12 +2570,14 @@ function ChatMarkdown({
     >
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
+        rehypePlugins={
+          parseRawHtml ? CHAT_MARKDOWN_RAW_HTML_REHYPE_PLUGINS : CHAT_MARKDOWN_REHYPE_PLUGINS
+        }
         skipHtml={false}
         components={markdownComponents}
         urlTransform={markdownUrlTransform}
       >
-        {text}
+        {normalizedText}
       </ReactMarkdown>
     </div>
   );

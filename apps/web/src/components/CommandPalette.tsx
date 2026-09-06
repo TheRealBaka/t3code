@@ -45,8 +45,10 @@ import {
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
+  GaugeIcon,
   LinkIcon,
   MessageSquareIcon,
+  MessagesSquareIcon,
   PaletteIcon,
   ServerIcon,
   SettingsIcon,
@@ -102,6 +104,7 @@ import { onOpenCommandPalette } from "../commandPaletteBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
+import { useUsageCardStore } from "../usageCardStore";
 import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
 import {
   cn,
@@ -1608,6 +1611,57 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
     });
+  }
+
+  if (activeThread) {
+    actionItems.push({
+      kind: "action",
+      value: "action:open-side-chat",
+      searchTerms: ["side chat", "btw", "by the way", "ask", "question", "fork"],
+      title: "Open side chat",
+      description: "Ask about this thread without adding to it",
+      icon: <MessagesSquareIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useRightPanelStore
+          .getState()
+          .open(scopeThreadRef(activeThread.environmentId, activeThread.id), "side-chat");
+      },
+    });
+  }
+
+  if (activeThread) {
+    const usageInstanceId =
+      activeThread.session?.providerInstanceId ?? activeThread.modelSelection.instanceId;
+    const usageDriverKind =
+      providerEntryByEnvironmentAndInstanceId.get(
+        `${activeThread.environmentId}:${usageInstanceId}`,
+      )?.driverKind ?? null;
+    // Without a resolved driver the card cannot say whether a plan quota
+    // applies, so the entry stays out rather than opening onto a guess.
+    if (usageDriverKind !== null) {
+      actionItems.push({
+        kind: "action",
+        value: "action:show-usage",
+        searchTerms: [
+          "usage",
+          "status",
+          "limits",
+          "quota",
+          "rate limit",
+          "weekly",
+          "tokens",
+          "cost",
+        ],
+        title: "Show usage",
+        description: "Plan limits and token spend for this machine",
+        icon: <GaugeIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          useUsageCardStore
+            .getState()
+            .open({ environmentId: activeThread.environmentId, provider: usageDriverKind });
+        },
+      });
+    }
   }
 
   actionItems.push({

@@ -19,11 +19,14 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+import {
+  filterRuntimeModeOptions,
+  getProviderSupportedRuntimeModes,
+} from "@t3tools/client-runtime/runtime-mode-options";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
   memo,
-  type ReactNode,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -32,7 +35,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import {
   clampCollapsedComposerCursor,
   type ComposerSubmissionIntent,
@@ -138,6 +140,7 @@ import {
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
+import { ComposerCommandMenuLayer } from "./ComposerCommandMenuLayer";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -197,101 +200,6 @@ function ComposerVideoThumbnail({ file }: { file: File }) {
   );
 }
 
-type ComposerCommandMenuPosition = {
-  bottom: number;
-  left: number;
-  maxHeight: number;
-  width: number;
-};
-
-function composerCommandMenuPositionsEqual(
-  a: ComposerCommandMenuPosition,
-  b: ComposerCommandMenuPosition,
-): boolean {
-  return (
-    a.bottom === b.bottom && a.left === b.left && a.maxHeight === b.maxHeight && a.width === b.width
-  );
-}
-
-function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children: ReactNode }) {
-  const [position, setPosition] = useState<ComposerCommandMenuPosition | null>(null);
-
-  useLayoutEffect(() => {
-    const anchor = props.anchor;
-    if (!anchor) {
-      setPosition(null);
-      return;
-    }
-
-    const updatePosition = () => {
-      const form = anchor.closest<HTMLElement>('[data-chat-composer-form="true"]');
-      const mainSurface = form?.querySelector<HTMLElement>(
-        '[data-chat-composer-main-surface="true"]',
-      );
-      const rect = (mainSurface ?? form ?? anchor).getBoundingClientRect();
-      const rootFontSizePx =
-        Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize) || 16;
-      const drawerInsetRem = Number.parseFloat(
-        window.getComputedStyle(form ?? anchor).getPropertyValue("--chat-composer-drawer-inset"),
-      );
-      const drawerInset = drawerInsetRem * rootFontSizePx;
-      // One extra pixel prevents fractional layout coordinates from exposing
-      // the canvas between the drawer mask and the composer's foreground edge.
-      // Mirrors --chat-composer-attachment-overlap: calc(1rem + 1px).
-      const composerOverlap = rootFontSizePx + 1;
-      const next = {
-        bottom: window.innerHeight - rect.top - composerOverlap,
-        left: rect.left + drawerInset,
-        maxHeight: Math.max(96, rect.top - 24 + composerOverlap),
-        width: Math.max(0, rect.width - drawerInset * 2),
-      };
-      setPosition((current) =>
-        current && composerCommandMenuPositionsEqual(current, next) ? current : next,
-      );
-    };
-
-    updatePosition();
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-
-    const observer =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updatePosition);
-    if (observer) {
-      // The composer is centered and capped at a max width, so opening a side
-      // panel slides it sideways without ever resizing it. Watching the anchor
-      // alone would leave the menu behind; the ancestors are what shrink, and
-      // they resize on every frame of the panel animation.
-      observer.observe(anchor);
-      for (let element = anchor.parentElement; element; element = element.parentElement) {
-        observer.observe(element);
-      }
-    }
-
-    return () => {
-      observer?.disconnect();
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [props.anchor]);
-
-  if (!position) return null;
-
-  return createPortal(
-    <div
-      className="pointer-events-auto fixed z-[70]"
-      data-composer-drawer-layer="true"
-      style={{
-        bottom: position.bottom,
-        left: position.left,
-        maxHeight: position.maxHeight,
-        width: position.width,
-      }}
-    >
-      {props.children}
-    </div>,
-    document.body,
-  );
-}
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -409,9 +317,14 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  supportedRuntimeModes?: ReadonlyArray<RuntimeMode> | undefined;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
+  const runtimeModeChoices = filterRuntimeModeOptions(
+    runtimeModeOptions,
+    props.supportedRuntimeModes,
+  );
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
   const interactionModeTooltip =
@@ -468,7 +381,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             <SelectValue>{runtimeModeOption.label}</SelectValue>
           </TooltipTrigger>
           <SelectPopup alignItemWithTrigger={false}>
-            {runtimeModeOptions.map((mode) => {
+            {runtimeModeChoices.map((mode) => {
               const option = runtimeModeConfig[mode];
               const OptionIcon = option.icon;
               return (
@@ -1314,6 +1227,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           label: "/model",
           description: "Switch response model for this thread",
         },
+        {
+          id: "slash:btw",
+          type: "slash-command",
+          command: "btw",
+          label: "/btw",
+          description: "Open a side chat about this thread",
+        },
+        {
+          id: "slash:usage",
+          type: "slash-command",
+          command: "usage",
+          label: "/usage",
+          description: "Show subscription limits and token usage",
+        },
         ...(planModeUiEnabled
           ? ([
               {
@@ -1337,10 +1264,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedProviderStatus?.skills ?? [],
         settings.showSkillsInSlashMenu,
       );
+      // Local commands win over a provider command of the same name (Claude
+      // Code ships its own /usage, which would otherwise show up twice).
+      const localSlashCommandNames = new Set(
+        builtInSlashCommandItems.map((item) => item.command as string),
+      );
       const providerSlashCommandItems = getProviderSlashCommandsForSlashMenu(
         selectedProviderStatus?.slashCommands ?? [],
         slashMenuSkills,
-      ).map((command) => ({
+      )
+        .filter((command) => !localSlashCommandNames.has(command.name.toLowerCase()))
+        .map((command) => ({
         id: `provider-slash-command:${selectedProvider}:${command.name}`,
         type: "provider-slash-command" as const,
         provider: selectedProvider,
@@ -2014,6 +1948,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "slash-command") {
+        if (item.command === "btw" || item.command === "usage") {
+          // These run locally on send (ChatView intercepts them), so just leave
+          // the command in the prompt like a provider command.
+          const replacement = `/${item.command} `;
+          const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            replacementRangeEnd,
+            replacement,
+            { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
         if (item.command === "model") {
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -4151,6 +4105,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <CompactComposerControlsMenu
                       interactionMode={interactionMode}
                       runtimeMode={runtimeMode}
+                      supportedRuntimeModes={getProviderSupportedRuntimeModes(selectedProviderStatus)}
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       traitsMenuContent={providerTraitsMenuContent}
                       onToggleInteractionMode={toggleInteractionMode}
@@ -4173,6 +4128,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         }
                         interactionMode={interactionMode}
                         runtimeMode={runtimeMode}
+                        supportedRuntimeModes={getProviderSupportedRuntimeModes(selectedProviderStatus)}
                         onToggleInteractionMode={toggleInteractionMode}
                         onRuntimeModeChange={handleRuntimeModeChange}
                       />

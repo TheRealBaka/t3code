@@ -5,6 +5,8 @@ import type {
   ProviderOptionSelection,
   RuntimeMode,
 } from "@t3tools/contracts";
+import { getProviderSupportedRuntimeModes } from "@t3tools/client-runtime/runtime-mode-options";
+import { useAtomValue } from "@effect/atom-react";
 import type { LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { HeaderHeightContext } from "@react-navigation/elements";
@@ -60,7 +62,7 @@ import {
   NATIVE_MAIL_SEARCH_TOOLBAR_CONTENT_INSET,
   NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED,
 } from "../layout/native-mail-search-toolbar";
-import { RUNTIME_MODE_CHOICES, selectableChoices } from "./thread-settings-options";
+import { filterRuntimeModeChoices, selectableChoices } from "./thread-settings-options";
 import {
   modelMatchesCatalogQuery,
   pendingModelAfterPress,
@@ -307,6 +309,7 @@ type ThreadSettingsSessionProps = {
   readonly optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly onUpdateOptionSelections: (selections: ReadonlyArray<ProviderOptionSelection>) => void;
   readonly runtimeMode: RuntimeMode;
+  readonly supportedRuntimeModes?: ReadonlyArray<RuntimeMode> | undefined;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
 };
 
@@ -355,6 +358,11 @@ type ThreadSettingsSessionValue = {
   readonly environmentId: EnvironmentId | null;
   readonly providerGroups: ReadonlyArray<ProviderGroup>;
   readonly runtimeMode: RuntimeMode;
+  readonly runtimeModeChoices: ReadonlyArray<{
+    readonly mode: RuntimeMode;
+    readonly label: string;
+    readonly description: string;
+  }>;
   readonly onUpdateRuntimeMode: (mode: RuntimeMode) => void;
   readonly displayedDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
   readonly providerExpansionOverrides: ReadonlySet<string>;
@@ -387,6 +395,10 @@ function ThreadSettingsSessionProvider(
     () => new Set(),
   );
   const [pendingModel, setPendingModel] = useState<ModelOption | null>(null);
+  const runtimeModeChoices = useMemo(
+    () => filterRuntimeModeChoices(props.supportedRuntimeModes),
+    [props.supportedRuntimeModes],
+  );
 
   const isApplied = useCallback(
     (option: ModelOption) =>
@@ -474,6 +486,7 @@ function ThreadSettingsSessionProvider(
       environmentId: props.environmentId,
       providerGroups: props.providerGroups,
       runtimeMode: props.runtimeMode,
+      runtimeModeChoices,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
       displayedDescriptors,
       providerExpansionOverrides,
@@ -507,6 +520,7 @@ function ThreadSettingsSessionProvider(
       props.onUpdateRuntimeMode,
       props.providerGroups,
       props.runtimeMode,
+      runtimeModeChoices,
       searchQuery,
       showLegacyToggle,
       toggleProvider,
@@ -731,7 +745,8 @@ function ThreadSettingsOptionsItem(props: {
             isLast
             label="Runtime"
             value={
-              RUNTIME_MODE_CHOICES.find((choice) => choice.mode === session.runtimeMode)?.label
+              session.runtimeModeChoices.find((choice) => choice.mode === session.runtimeMode)
+                ?.label
             }
             onPress={() => props.onOpenSubmenu({ kind: "runtime" })}
           />
@@ -881,7 +896,7 @@ function ThreadSettingsChoiceContent(props: {
   const submenuContent =
     props.submenu.kind === "runtime"
       ? {
-          rows: RUNTIME_MODE_CHOICES.map((choice) => ({
+          rows: session.runtimeModeChoices.map((choice) => ({
             id: choice.mode,
             label: choice.label,
             description: choice.description,
@@ -1278,6 +1293,7 @@ export function NewTaskThreadSettingsRouteScreen() {
       optionDescriptors={optionDescriptors}
       onUpdateOptionSelections={flow.setSelectedModelOptions}
       runtimeMode={flow.runtimeMode}
+      supportedRuntimeModes={getProviderSupportedRuntimeModes(flow.selectedProviderStatus)}
       onUpdateRuntimeMode={flow.setRuntimeMode}
     >
       <ThreadSettingsPickerNavigator onClose={() => navigation.goBack()} />

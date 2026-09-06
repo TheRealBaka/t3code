@@ -9,6 +9,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   USAGE_CONTRACT_VERSION,
+  type ClaudeUsageLimits,
   type EnvironmentId,
   type UsageSummary,
   type UsageSummaryInput,
@@ -20,6 +21,7 @@ import { useCallback, useMemo } from "react";
 import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "@t3tools/shared/usageMerge";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentPresentations } from "./presentation";
+import { useEnvironmentQuery, type EnvironmentQueryView } from "./query";
 import { serverEnvironment } from "./server";
 
 export interface EnvironmentUsageStatus {
@@ -133,4 +135,25 @@ export function useUsage(input: UsageSummaryInput): UsageView {
     isPartial: answeredCount > 0 && stillReporting > 0,
     refresh,
   };
+}
+
+/**
+ * Claude's subscription quota for one environment.
+ *
+ * Distinct from `useUsage`: that merges token and cost totals scanned out of
+ * local transcripts, while this is the live plan quota Claude Code's own
+ * `/usage` reports. It is one environment's answer because the credentials, and
+ * therefore the account, belong to that machine.
+ */
+export function useClaudeUsageLimits(
+  environmentId: EnvironmentId | null,
+): EnvironmentQueryView<ClaudeUsageLimits> {
+  const atom = useMemo(
+    () =>
+      environmentId === null
+        ? null
+        : serverEnvironment.claudeUsageLimits({ environmentId, input: {} }),
+    [environmentId],
+  );
+  return useEnvironmentQuery(atom);
 }

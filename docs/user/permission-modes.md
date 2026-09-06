@@ -29,6 +29,10 @@ there.
 For Grok, **Always allow this session** remembers the matching command or tool input. Other
 actions still ask for approval. It does not change the thread to **Full access**.
 
+Pi Agent is an Early Access exception: its RPC protocol currently supports Full Access only, so
+T3 Code only offers Full Access for Pi threads and rejects other modes. See
+[Pi Agent](./providers-pi-agent.md#permissions).
+
 ## Choosing a Mode
 
 Use **Full access** for work in a worktree or a sandbox you can throw away.

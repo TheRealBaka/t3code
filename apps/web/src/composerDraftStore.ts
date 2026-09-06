@@ -58,6 +58,7 @@ import { useShallow } from "zustand/react/shallow";
 import { createDebouncedStorage, createMemoryStorage } from "./lib/storage";
 import { getDefaultServerModel } from "./providerModels";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
+import { renumberChatReplyComments } from "./chatReplyComments";
 import { ReviewCommentContextSchema, type ReviewCommentContext } from "./reviewCommentContext";
 const isRuntimeMode = Schema.is(RuntimeMode);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
@@ -3734,8 +3735,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           set((state) => {
             const current = state.draftsByThreadKey[threadKey];
             if (!current) return state;
-            const reviewComments = current.reviewComments.filter((entry) => entry.id !== commentId);
-            if (reviewComments.length === current.reviewComments.length) return state;
+            const remaining = current.reviewComments.filter((entry) => entry.id !== commentId);
+            if (remaining.length === current.reviewComments.length) return state;
+            const reviewComments = renumberChatReplyComments(remaining);
             const nextDraft = { ...current, reviewComments };
             const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
             if (shouldRemoveDraft(nextDraft)) delete nextDraftsByThreadKey[threadKey];

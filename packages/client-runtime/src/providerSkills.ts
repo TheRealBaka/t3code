@@ -78,6 +78,8 @@ export function resolveProviderSkillSourceKind(
       return "personal";
     case "system":
       return "system";
+    case "plugin":
+      return "app";
     case undefined:
     case "":
       return "other";

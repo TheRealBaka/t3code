@@ -56,6 +56,11 @@ export const PROVIDER_OPTIONS: Array<{
     available: true,
     pickerSidebarBadge: "new",
   },
+  {
+    value: ProviderDriverKind.make("piAgent"),
+    label: "Pi Agent",
+    available: true,
+  },
 ];
 
 export type WorkLogToolLifecycleStatus =

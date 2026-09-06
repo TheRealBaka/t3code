@@ -88,6 +88,7 @@ import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
   type ComposerSubmissionIntent,
+  parseSideChatComposerCommand,
   parseStandaloneComposerSlashCommand,
 } from "../composer-logic";
 import {
@@ -152,6 +153,8 @@ import {
   updatePullRequestTabStatus,
   useRightPanelStore,
 } from "../rightPanelStore";
+import { useSideChatStore } from "../sideChatStore";
+import { isUsageComposerCommand, useUsageCardStore } from "../usageCardStore";
 import {
   isPreviewSupportedInRuntime,
   setActivePreviewTab,
@@ -173,6 +176,7 @@ import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
 import { RightPanelTabs, type PullRequestTabStatus } from "./RightPanelTabs";
+import { SideChatPanel } from "./SideChatPanel";
 import { AgentsPanel } from "./AgentsPanel";
 import {
   deriveAgentPanelModel,
@@ -3627,6 +3631,21 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
   }, [activeThreadRef]);
+  const addSideChatSurface = useCallback(() => {
+    if (!activeThreadRef) return;
+    useRightPanelStore.getState().open(activeThreadRef, "side-chat");
+  }, [activeThreadRef]);
+  /** `/btw` opens the side chat; any text after it prefills the side chat composer. */
+  const openSideChatQuestion = useCallback(
+    (question: string) => {
+      if (!activeThreadRef) return;
+      useRightPanelStore.getState().open(activeThreadRef, "side-chat");
+      if (question.length > 0) {
+        useSideChatStore.getState().requestAsk(activeThreadRef, question);
+      }
+    },
+    [activeThreadRef],
+  );
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
@@ -5605,6 +5624,30 @@ function ChatViewContent(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
+    // `/btw` never reaches the agent, and never waits on it either: the side
+    // chat is most useful while a turn is running, so this runs before the
+    // busy and connection gates below.
+    if (!directAnnotation && isServerThread && activeThreadRef) {
+      const sideChatCommand = parseSideChatComposerCommand(promptRef.current);
+      if (sideChatCommand) {
+        // Only the prompt goes: attachments and contexts the user staged are
+        // still meant for the agent, and a side chat cannot carry them.
+        promptRef.current = "";
+        setComposerDraftPrompt(composerDraftTarget, "");
+        composerRef.current?.resetCursorState();
+        openSideChatQuestion(sideChatCommand.question);
+        return;
+      }
+    }
+    // `/usage` and `/status` report on the plan and the spend rather than
+    // asking the agent anything, so they never reach it either.
+    if (!directAnnotation && isUsageComposerCommand(promptRef.current)) {
+      promptRef.current = "";
+      setComposerDraftPrompt(composerDraftTarget, "");
+      composerRef.current?.resetCursorState();
+      useUsageCardStore.getState().open({ environmentId, provider: selectedProvider });
+      return;
+    }
     const notifyDirectAnnotationAttached = () => {
       if (!directAnnotation) return;
       toastManager.add(
@@ -7151,6 +7194,19 @@ function ChatViewContent(props: ChatViewProps) {
         composerDraftTarget={composerDraftTarget}
         onStateChange={handlePullRequestTabStatusChange}
       />
+    ) : activeRightPanelSurface?.kind === "side-chat" ? (
+      <SideChatPanel
+        threadRef={activeThreadRef}
+        cwd={activeWorkspaceRoot}
+        providerStatuses={providerStatuses}
+        settings={settings}
+        resolvedTheme={resolvedTheme}
+        threadModelSelection={activeThread?.modelSelection}
+        supportsAttachmentUploads={supportsAttachmentUploads}
+        worktreePath={activeThreadWorktreePath}
+        branch={activeThreadBranch}
+        showCheckoutStatus={showComposerContextStrip}
+      />
     ) : activeRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
@@ -7231,6 +7287,7 @@ function ChatViewContent(props: ChatViewProps) {
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
+            onOpenSideChat={addSideChatSurface}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
@@ -7628,12 +7685,14 @@ function ChatViewContent(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddAgents={addAgentsSurface}
+          onAddSideChat={addSideChatSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           agentsAvailable
+          sideChatAvailable={isServerThread}
           pullRequestStatuses={pullRequestTabStatuses}
           liveAgentCount={agentPanelModel.liveCount}
         >
@@ -7668,12 +7727,14 @@ function ChatViewContent(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddAgents={addAgentsSurface}
+            onAddSideChat={addSideChatSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
             pullRequestAvailable={pullRequestSurfaceAvailable}
             agentsAvailable
+            sideChatAvailable={isServerThread}
             pullRequestStatuses={pullRequestTabStatuses}
             liveAgentCount={agentPanelModel.liveCount}
           >

@@ -2,7 +2,7 @@ import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerSlashCommand = "model" | "plan" | "default" | "btw" | "usage";
 export type ComposerSubmissionIntent = "foreground" | "background";
 
 export interface ComposerTrigger {
@@ -270,7 +270,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+): "plan" | "default" | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
@@ -278,6 +278,18 @@ export function parseStandaloneComposerSlashCommand(
   const command = match[1]?.toLowerCase();
   if (command === "plan") return "plan";
   return "default";
+}
+
+/**
+ * `/btw` opens the side chat instead of sending to the agent. A bare `/btw`
+ * just opens the panel; anything after it is asked as the side question.
+ */
+export function parseSideChatComposerCommand(text: string): { question: string } | null {
+  const match = /^\/btw(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  if (!match) {
+    return null;
+  }
+  return { question: (match[1] ?? "").trim() };
 }
 
 export function replaceTextRange(

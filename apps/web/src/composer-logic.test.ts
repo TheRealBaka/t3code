@@ -7,6 +7,7 @@ import {
   detectComposerTrigger,
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
+  parseSideChatComposerCommand,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "./composer-logic";
@@ -399,6 +400,29 @@ describe("isCollapsedCursorAdjacentToInlineToken", () => {
 
     expect(isCollapsedCursorAdjacentToInlineToken(text, tokenEnd, "left")).toBe(true);
     expect(isCollapsedCursorAdjacentToInlineToken(text, tokenStart, "right")).toBe(true);
+  });
+});
+
+describe("parseSideChatComposerCommand", () => {
+  it("takes the remainder of a /btw prompt as the question", () => {
+    expect(parseSideChatComposerCommand("/BTW what does this refactor buy us?")).toEqual({
+      question: "what does this refactor buy us?",
+    });
+  });
+
+  it("treats a bare /btw as opening the panel with no question", () => {
+    expect(parseSideChatComposerCommand("  /btw  ")).toEqual({ question: "" });
+  });
+
+  it("keeps multi-line questions intact", () => {
+    expect(parseSideChatComposerCommand("/btw why this?\nand why now?")).toEqual({
+      question: "why this?\nand why now?",
+    });
+  });
+
+  it("ignores prompts that only mention btw", () => {
+    expect(parseSideChatComposerCommand("btw, ship it")).toBeNull();
+    expect(parseSideChatComposerCommand("/btwice as fast")).toBeNull();
   });
 });
 

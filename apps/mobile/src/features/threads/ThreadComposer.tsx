@@ -8,6 +8,7 @@ import type {
   RuntimeMode,
   ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
+import { getProviderSupportedRuntimeModes } from "@t3tools/client-runtime/runtime-mode-options";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
 import {
@@ -342,6 +343,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       ) ?? null
     );
   }, [props.serverConfig, props.selectedThread.modelSelection.instanceId]);
+  const supportedRuntimeModes = getProviderSupportedRuntimeModes(selectedProviderStatus);
   const composerOwnerKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
 
   const composerMenu = useComposerCommandMenu({
@@ -498,6 +500,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       onUpdateOptionSelections: (options) =>
         props.onUpdateModelSelection({ ...currentModelSelection, options }),
       runtimeMode: currentRuntimeMode,
+      supportedRuntimeModes,
       onUpdateRuntimeMode: props.onUpdateRuntimeMode,
     }),
     [
@@ -506,6 +509,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       props.onUpdateModelSelection,
       props.onUpdateRuntimeMode,
       providerOptionDescriptors,
+      supportedRuntimeModes,
       settingsOwnerId,
       threadProviderGroups,
     ],
