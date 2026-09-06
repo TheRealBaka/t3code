@@ -63,6 +63,7 @@ jobs:
             apps/server/src/usage/ClaudeUsageLimits.test.ts \
             apps/server/src/provider/Drivers/ClaudeSkills.test.ts \
             apps/web/src/components/usage/usageLimitsFormat.test.ts \
+            apps/web/src/selectionQuote.test.ts \
             packages/client-runtime/src/runtimeModeOptions.test.ts
           vp test run apps/server/src/server.test.ts -t 'allows credentialed preflights from t3code-preview'
 

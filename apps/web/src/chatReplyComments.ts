@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { ReviewCommentContext } from "./reviewCommentContext";
+import { quoteSearchNeedle } from "./selectionQuote";
 
 /**
  * Comments on assistant replies reuse the review-comment record so the
@@ -79,7 +80,7 @@ export function normalizeQuoteText(text: string): string {
  * relative to the container, or null when the text is no longer present.
  */
 export function quoteTopOffset(container: HTMLElement, quote: string): number | null {
-  const needle = normalizeQuoteText(quote);
+  const needle = normalizeQuoteText(quoteSearchNeedle(quote));
   if (needle.length === 0) return null;
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   const nodes: Array<{ node: Text; start: number }> = [];

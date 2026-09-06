@@ -1014,9 +1014,11 @@ export function SideChatPanel({
                             </button>
                           </TooltipTrigger>
                           <TooltipPopup side="top" className="max-w-72">
-                            <span className="block whitespace-pre-wrap">
-                              {previewSideChatQuote(selection.quote)}
-                            </span>
+                            <ChatMarkdown
+                              text={previewSideChatQuote(selection.quote)}
+                              cwd={cwd}
+                              threadRef={threadRef}
+                            />
                           </TooltipPopup>
                         </Tooltip>
                       ))}

@@ -19,10 +19,12 @@ import {
   quoteTopOffset,
   useReplyCommentFocusStore,
 } from "~/chatReplyComments";
+import ChatMarkdown from "~/components/ChatMarkdown";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { cn } from "~/lib/utils";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { useRightPanelStore } from "~/rightPanelStore";
+import { quoteTextFromRange } from "~/selectionQuote";
 import { useSideChatSelectionStore } from "~/sideChatSelectionStore";
 
 const EMPTY_COMMENTS: ReadonlyArray<ReviewCommentContext> = [];
@@ -274,7 +276,7 @@ export function AssistantReplyComments(props: {
       return;
     }
     const range = clipRangeToContainer(domSelection.getRangeAt(0), container);
-    const quote = range ? normalizeQuoteText(range.toString()) : "";
+    const quote = range ? normalizeQuoteText(quoteTextFromRange(range)) : "";
     if (!range || quote.length === 0) {
       clear();
       return;
@@ -442,7 +444,6 @@ export function AssistantReplyComments(props: {
             key={comment.id}
             type="button"
             aria-label={`Comment ${number}`}
-            title={comment.text}
             {...{ [OWN_UI_ATTRIBUTE]: "" }}
             data-reply-comment-id={comment.id}
             className={cn(BUBBLE_CLASS_NAME, "absolute right-1 z-10")}
@@ -475,7 +476,7 @@ export function AssistantReplyComments(props: {
             </button>
           </div>
           <blockquote className="line-clamp-4 border-s-2 border-border ps-2 text-muted-foreground">
-            {openComment.diff}
+            <ChatMarkdown text={openComment.diff} cwd={undefined} threadRef={threadRef} />
           </blockquote>
           {editText === null ? (
             <div className="whitespace-pre-wrap">{openComment.text}</div>
@@ -588,7 +589,7 @@ export function AssistantReplyComments(props: {
               onMouseDown={(event) => event.stopPropagation()}
             >
               <blockquote className="line-clamp-2 border-s-2 border-border ps-2 text-[11px] text-muted-foreground">
-                {selection.quote}
+                <ChatMarkdown text={selection.quote} cwd={undefined} threadRef={threadRef} />
               </blockquote>
               <textarea
                 autoFocus
