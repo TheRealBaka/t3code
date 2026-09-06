@@ -13,11 +13,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  macos:
+  checks:
     if: github.repository == 'TheRealBaka/t3code' && github.ref == 'refs/heads/release/preview'
-    # Standard GitHub-hosted Apple Silicon runner, not a paid/larger runner.
-    runs-on: macos-15
-    timeout-minutes: 60
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -39,10 +38,6 @@ jobs:
 
       - name: Install locked desktop dependencies
         run: vp install --frozen-lockfile --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
 
       - name: Check desktop and feature behavior
         run: |
@@ -73,37 +68,172 @@ jobs:
           vp run --filter @t3tools/web typecheck
           vp run --filter t3 typecheck
 
-      - name: Stamp preview version
+      - name: Resolve preview version
         id: version
-        run: |
-          version="0.0.38-preview.${GITHUB_RUN_NUMBER}"
-          node scripts/update-release-package-versions.ts "$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+        run: echo "version=0.0.38-preview.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
-      - name: Build unsigned Apple Silicon DMG
+  # node-pty publishes no Linux prebuilt and the WSL backend runs under the
+  # distro's own Linux Node, which cannot load the Windows binary. Build the
+  # Linux pty.node here and hand it to the Windows packaging job so the Windows
+  # download ships a working WSL backend without a first-launch compile.
+  wsl_node_pty:
+    needs: checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: true
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: false
+
+      - name: Install server dependencies
+        run: vp install --frozen-lockfile --filter=t3...
+
+      - name: Build node-pty linux-x64 prebuild
+        run: |
+          set -euo pipefail
+          pty_pkg="$(node -e "console.log(require.resolve('node-pty/package.json', { paths: ['$GITHUB_WORKSPACE/apps/server'] }))")"
+          pty_dir="$(dirname "$pty_pkg")"
+          ( cd "$pty_dir" && npx --yes node-gyp rebuild )
+          mkdir -p wsl-prebuild
+          cp "$pty_dir/build/Release/pty.node" wsl-prebuild/pty.node
+          file wsl-prebuild/pty.node
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild/pty.node
+          if-no-files-found: error
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: [checks, wsl_node_pty]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      PREVIEW_VERSION: ${{ needs.checks.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            # Standard GitHub-hosted Apple Silicon runner, not a paid/larger runner.
+            runner: macos-15
+            platform: mac
+            target: dmg
+            arch: arm64
+            rust_target: aarch64-apple-darwin
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            target: AppImage
+            arch: x64
+            rust_target: x86_64-unknown-linux-gnu
+          - label: Windows x64
+            runner: windows-2025
+            platform: win
+            target: nsis
+            arch: x64
+            rust_target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: true
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: ${{ matrix.platform != 'win' }}
+          run-install: false
+
+      - name: Install locked desktop dependencies
+        shell: bash
+        run: vp install --frozen-lockfile --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install ImageMagick
+        if: matrix.platform == 'linux'
+        run: |
+          if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y imagemagick
+          fi
+
+      - name: Install Spectre-mitigated MSVC libs
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          $setupExe = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $proc = Start-Process -FilePath $setupExe `
+            -ArgumentList "modify", "--installPath", "`"$installPath`"", "--add", `
+            "Microsoft.VisualStudio.Component.VC.Tools.x86.x64.Spectre", "--quiet", "--norestart" `
+            -Wait -PassThru -NoNewWindow
+          if ($null -eq $proc -or $proc.ExitCode -ne 0) {
+            $code = if ($null -ne $proc) { $proc.ExitCode } else { 1 }
+            Write-Error "Visual Studio Installer failed with exit code $code"
+            exit $code
+          }
+
+      - name: Download WSL node-pty prebuild
+        if: matrix.platform == 'win'
+        uses: actions/download-artifact@v8
+        with:
+          name: wsl-node-pty-x64
+          path: wsl-prebuild
+
+      - name: Stamp preview version
+        shell: bash
+        run: node scripts/update-release-package-versions.ts "$PREVIEW_VERSION"
+
+      - name: Build unsigned ${{ matrix.label }} installer
+        shell: bash
         env:
           T3CODE_DESKTOP_SIGNED: "false"
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          PREVIEW_VERSION: ${{ steps.version.outputs.version }}
         # No .env.example copy: cloud login and relay are intentionally unconfigured.
         # Preview versions omit the updater feed; releases are installed manually.
         run: |
-          vp run dist:desktop:artifact \
-            --platform mac --target dmg --arch arm64 \
-            --build-version "$PREVIEW_VERSION" --verbose
+          args=(
+            --platform "${{ matrix.platform }}"
+            --target "${{ matrix.target }}"
+            --arch "${{ matrix.arch }}"
+            --build-version "$PREVIEW_VERSION"
+            --verbose
+          )
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            args+=(--wsl-prebuild "$GITHUB_WORKSPACE/wsl-prebuild/pty.node")
+          fi
+          vp run dist:desktop:artifact "${args[@]}"
 
-      - name: Inspect bundle and checksum download
-        env:
-          PREVIEW_VERSION: ${{ steps.version.outputs.version }}
+      - name: Inspect macOS bundle
+        if: matrix.platform == 'mac'
         run: |
           set -euo pipefail
-          dmg="T3-Code-Preview-${PREVIEW_VERSION}-arm64.dmg"
+          dmg="T3-Code-PlusPlus-${PREVIEW_VERSION}-arm64.dmg"
           test -s "release/$dmg"
           mount="$RUNNER_TEMP/preview-dmg"
           mkdir -p "$mount"
           hdiutil attach "release/$dmg" -readonly -nobrowse -mountpoint "$mount"
           trap 'hdiutil detach "$mount"' EXIT
-          app="$mount/T3 Code Preview.app"
+          app="$mount/T3 Code++.app"
           test -d "$app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "io.github.therealbaka.t3code.preview"
           executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
@@ -112,21 +242,57 @@ jobs:
           ELECTRON_RUN_AS_NODE=1 T3CODE_HOME="$RUNNER_TEMP/preview-smoke" \
             "$app/Contents/MacOS/$executable" \
             "$app/Contents/Resources/app.asar/apps/server/dist/bin.mjs" --help
-          cd release
-          shasum -a 256 "$dmg" > SHA256SUMS.txt
+
+      - name: Inspect Linux AppImage
+        if: matrix.platform == 'linux'
+        run: |
+          set -euo pipefail
+          appimage="T3-Code-PlusPlus-${PREVIEW_VERSION}-x64.AppImage"
+          test -s "release/$appimage"
+          extract="$RUNNER_TEMP/preview-appimage"
+          mkdir -p "$extract"
+          cp "release/$appimage" "$extract/app.AppImage"
+          chmod +x "$extract/app.AppImage"
+          ( cd "$extract" && ./app.AppImage --appimage-extract >/dev/null )
+          root="$extract/squashfs-root"
+          test -x "$root/t3code-preview"
+          test ! -e "$root/resources/app-update.yml"
+          ELECTRON_RUN_AS_NODE=1 T3CODE_HOME="$RUNNER_TEMP/preview-smoke" \
+            "$root/t3code-preview" \
+            "$root/resources/app.asar/apps/server/dist/bin.mjs" --help
+
+      - name: Inspect Windows installer
+        if: matrix.platform == 'win'
+        shell: bash
+        run: |
+          set -euo pipefail
+          installer="T3-Code-PlusPlus-${PREVIEW_VERSION}-x64.exe"
+          test -s "release/$installer"
+          ls -la release
+
+      - name: Collect installer and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p publish
+          shopt -s nullglob
+          for file in release/*.dmg release/*.AppImage release/*.exe; do
+            cp "$file" publish/
+          done
+          cd publish
+          test -n "$(ls)"
+          shasum -a 256 * > "SHA256SUMS-${{ matrix.platform }}-${{ matrix.arch }}.txt"
 
       - uses: actions/upload-artifact@v7
         with:
-          name: macos-arm64-preview
-          path: |
-            release/*.dmg
-            release/SHA256SUMS.txt
+          name: desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: publish/*
           if-no-files-found: error
           retention-days: 14
 
   publish:
-    needs: macos
-    runs-on: ubuntu-latest
+    needs: [checks, build]
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -138,13 +304,21 @@ jobs:
           sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v8
         with:
-          name: macos-arm64-preview
+          pattern: desktop-*
           path: downloads
+          merge-multiple: true
+      - name: Merge checksums
+        run: |
+          set -euo pipefail
+          cd downloads
+          cat SHA256SUMS-*.txt > SHA256SUMS.txt
+          rm SHA256SUMS-*.txt
+          ls -la
       - name: Publish GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          VERSION: ${{ needs.macos.outputs.version }}
+          VERSION: ${{ needs.checks.outputs.version }}
         run: |
           set -euo pipefail
           tag="preview-${VERSION}"
@@ -153,7 +327,7 @@ jobs:
           else
             gh release create "$tag" downloads/* \
               --target "$GITHUB_SHA" \
-              --title "T3 Code Preview ${VERSION}" \
+              --title "T3 Code++ ${VERSION}" \
               --notes-file docs/user/preview-release-notes.md \
               --prerelease --latest=false
           fi
