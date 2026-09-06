@@ -70,7 +70,10 @@ instance, deduplicating instances that share a Session directory. If an
 instance has no override, T3 Code uses Pi's standard
 `PI_CODING_AGENT_SESSION_DIR` and Agent directory defaults. Token totals and
 costs come from Pi's own recorded usage, including provider-reported prices for
-custom models.
+custom models. Typing `/usage` in a Pi thread opens the same card the Claude
+Code thread shows: with an `anthropic/…` model it reads the Claude plan limits
+from the Claude Code sign-in on this machine, and with other model providers
+it explains that no subscription quota is readable and shows token totals.
 
 Pi Agent does not currently provide T3 Code's structured text-generation
 operations for commit messages, pull-request text, branch names, or thread

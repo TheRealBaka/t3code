@@ -12,6 +12,11 @@ export interface UsageCardTarget {
   readonly environmentId: EnvironmentId;
   /** The provider the composer would send to, so the card can say what it covers. */
   readonly provider: ProviderDriverKind;
+  /**
+   * The selected model. Pi routes to a model provider named by the slug prefix
+   * (`anthropic/…`, `openai-codex/…`), which decides whose quota applies.
+   */
+  readonly model: string | null;
 }
 
 interface UsageCardState {

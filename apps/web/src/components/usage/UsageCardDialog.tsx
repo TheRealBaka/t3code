@@ -32,6 +32,45 @@ import { PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
 
 /** Only Claude Code reports a subscription quota T3 Code can read. */
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
+const PI_DRIVER = ProviderDriverKind.make("piAgent");
+
+/**
+ * Whose quota the card should read for a thread. Pi is a harness over other
+ * model providers, so its quota belongs to the model provider named by the
+ * slug prefix (`anthropic/claude-…`, `openai-codex/gpt-…`), not to Pi.
+ */
+function quotaSourceFor(target: UsageCardTarget): {
+  readonly claude: boolean;
+  readonly note: string | null;
+} {
+  if (target.provider === CLAUDE_DRIVER) return { claude: true, note: null };
+  if (target.provider !== PI_DRIVER) {
+    return {
+      claude: false,
+      note: "This thread is not a Claude thread, so there is no subscription quota to read.",
+    };
+  }
+  const modelProvider = target.model?.split("/")[0]?.trim().toLowerCase() ?? "";
+  switch (modelProvider) {
+    case "anthropic":
+      return {
+        claude: true,
+        note: "Pi is using Anthropic. Limits are read from the Claude Code sign-in on this machine, which applies when Pi uses the same subscription.",
+      };
+    case "openai-codex":
+      return {
+        claude: false,
+        note: "Pi is using your ChatGPT subscription through Codex. T3 Code cannot read that quota yet; token totals are below.",
+      };
+    case "":
+      return { claude: false, note: "Pick a Pi model to see whose limits apply." };
+    default:
+      return {
+        claude: false,
+        note: `Pi is using ${modelProvider} with API access, which has no subscription quota to read. Token totals are below.`,
+      };
+  }
+}
 
 /** Matches the window the weekly quota covers, so both halves read together. */
 const TOTALS_WINDOW_DAYS = 7;
@@ -50,9 +89,7 @@ export function UsageCardDialog() {
       <DialogPopup className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Usage</DialogTitle>
-          <DialogDescription>
-            Your Claude plan quota, and what this machine has spent.
-          </DialogDescription>
+          <DialogDescription>Your plan quota, and what this machine has spent.</DialogDescription>
         </DialogHeader>
         {target === null ? null : <UsageCardBody target={target} />}
       </DialogPopup>
@@ -61,16 +98,15 @@ export function UsageCardDialog() {
 }
 
 function UsageCardBody({ target }: { target: UsageCardTarget }) {
-  const isClaude = target.provider === CLAUDE_DRIVER;
+  const quotaSource = quotaSourceFor(target);
+  const isClaude = quotaSource.claude;
   const limits = useClaudeUsageLimits(isClaude ? target.environmentId : null);
   const totalsWindow = useMemo(() => makeWindow(TOTALS_WINDOW_DAYS), []);
   const usage = useUsage(totalsWindow);
 
   const nowMs = Date.now();
   const quotaRows = limits.data === null ? [] : quotaWindowRows(limits.data);
-  const quotaNote = isClaude
-    ? limits.error
-    : "This thread is not a Claude thread, so there is no subscription quota to read.";
+  const quotaNote = isClaude ? limits.error : quotaSource.note;
 
   return (
     <DialogPanel className="space-y-5">
@@ -98,6 +134,9 @@ function UsageCardBody({ target }: { target: UsageCardTarget }) {
         ) : null}
         {quotaRows.length === 0 && quotaNote !== null ? (
           <p className="text-sm text-muted-foreground">{quotaNote}</p>
+        ) : null}
+        {quotaRows.length > 0 && quotaSource.note !== null ? (
+          <p className="text-xs text-muted-foreground">{quotaSource.note}</p>
         ) : null}
         {quotaRows.length === 0 && quotaNote === null && !limits.isPending ? (
           <p className="text-sm text-muted-foreground">
