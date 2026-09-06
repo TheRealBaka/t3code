@@ -11,7 +11,7 @@ T3 Code++ is an independent, experimental fork of T3 Code. Downloads exist for A
 | --- | --- |
 | Apple Silicon Mac (M1, M2, M3, and later) | `T3-Code-PlusPlus-…-arm64.dmg` |
 | Windows 10/11, 64-bit | `T3-Code-PlusPlus-…-x64.exe` |
-| Linux, 64-bit | `T3-Code-PlusPlus-…-x64.AppImage` |
+| Linux, 64-bit | `T3-Code-PlusPlus-…-x86_64.AppImage` |
 
 No official T3 installation is required. The app bundles its server; you do not need to compile anything. An Intel Mac needs an x64 build, which is not published.
 
@@ -55,8 +55,8 @@ To use providers inside WSL, the Windows build ships the Linux terminal backend 
 1. Make the AppImage executable and start it:
 
    ```sh
-   chmod +x T3-Code-PlusPlus-*-x64.AppImage
-   ./T3-Code-PlusPlus-*-x64.AppImage
+   chmod +x T3-Code-PlusPlus-*-x86_64.AppImage
+   ./T3-Code-PlusPlus-*-x86_64.AppImage
    ```
 
 2. If it exits immediately with a FUSE error, install `libfuse2` from your distribution, or run it with `--appimage-extract-and-run`.

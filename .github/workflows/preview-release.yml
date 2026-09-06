@@ -247,7 +247,8 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           set -euo pipefail
-          appimage="T3-Code-PlusPlus-${PREVIEW_VERSION}-x64.AppImage"
+          # electron-builder names Linux artifacts by the kernel arch (x86_64).
+          appimage="T3-Code-PlusPlus-${PREVIEW_VERSION}-x86_64.AppImage"
           test -s "release/$appimage"
           extract="$RUNNER_TEMP/preview-appimage"
           mkdir -p "$extract"
@@ -281,7 +282,12 @@ jobs:
           done
           cd publish
           test -n "$(ls)"
-          shasum -a 256 * > "SHA256SUMS-${{ matrix.platform }}-${{ matrix.arch }}.txt"
+          # macOS ships shasum; Git Bash on Windows and Ubuntu ship sha256sum.
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum * > "SHA256SUMS-${{ matrix.platform }}-${{ matrix.arch }}.txt"
+          else
+            shasum -a 256 * > "SHA256SUMS-${{ matrix.platform }}-${{ matrix.arch }}.txt"
+          fi
 
       - uses: actions/upload-artifact@v7
         with:

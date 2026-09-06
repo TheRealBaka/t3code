@@ -8,7 +8,7 @@ Download the file for your machine below, then follow the [installation guide](h
 
 - **Apple Silicon Mac:** `…-arm64.dmg`. Open it and drag **T3 Code++** into **Applications**.
 - **Windows 10/11 (64-bit):** `…-x64.exe`. SmartScreen will show **More info → Run anyway**.
-- **Linux (64-bit):** `…-x64.AppImage`. Make it executable and run it.
+- **Linux (64-bit):** `…-x86_64.AppImage`. Make it executable and run it.
 
 Then configure your installed coding provider in **Settings → Providers**.
 

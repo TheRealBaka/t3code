@@ -12,7 +12,7 @@ Choose the newest **T3 Code++** prerelease and pick the file for your machine un
 | --- | --- |
 | Apple Silicon Mac (M1, M2, M3, and later) | `T3-Code-PlusPlus-…-arm64.dmg` |
 | Windows 10/11, 64-bit | `T3-Code-PlusPlus-…-x64.exe` |
-| Linux, 64-bit | `T3-Code-PlusPlus-…-x64.AppImage` |
+| Linux, 64-bit | `T3-Code-PlusPlus-…-x86_64.AppImage` |
 
 Intel Macs, Windows on ARM, and mobile are not part of the packaged releases. You do not need the official T3 app, Git, Node.js, or a compiler just to install the desktop app. Your coding provider may have its own prerequisites.
 
