@@ -23,7 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          persist-credentials: false
+          # checkout's immediate credential cleanup traverses malformed vendored
+          # gitlinks even with sparse checkout. Defer cleanup to its post-job hook.
+          persist-credentials: true
           sparse-checkout: |
             /*
             !/.repos/
@@ -129,7 +131,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          persist-credentials: false
+          persist-credentials: true
           sparse-checkout: |
             docs/user/preview-release-notes.md
           sparse-checkout-cone-mode: false
