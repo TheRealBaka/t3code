@@ -40,6 +40,7 @@ import {
   ProviderAdapterValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
+import { T3_MEDIA_RENDERING_INSTRUCTIONS } from "../MediaRenderingInstructions.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import {
   makePiRpcClient,
@@ -920,6 +921,8 @@ export const makePiAgentAdapter = Effect.fn("makePiAgentAdapter")(function* (
           "--approve",
           "--append-system-prompt",
           T3_PROGRESS_PROMPT,
+          "--append-system-prompt",
+          T3_MEDIA_RENDERING_INSTRUCTIONS,
           ...(settings.sessionDir.trim()
             ? ["--session-dir", path.resolve(cwd, expandHomePath(settings.sessionDir.trim()))]
             : []),

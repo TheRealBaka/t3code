@@ -14,6 +14,7 @@ import {
   codexDefaultModeDeveloperInstructions,
   codexPlanModeDeveloperInstructions,
 } from "../CodexDeveloperInstructions.ts";
+import { T3_MEDIA_RENDERING_INSTRUCTIONS } from "../MediaRenderingInstructions.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
@@ -473,6 +474,17 @@ describe("buildCodexDeveloperInstructions", () => {
 
     NodeAssert.ok(instructions.startsWith(codexPlanModeDeveloperInstructions(true)));
     NodeAssert.match(instructions, /as gpt-5\.3-codex with medium reasoning effort/);
+  });
+
+  it("tells the agent how to show media inline in both modes", () => {
+    const runtime = { model: "gpt-5.3-codex", reasoningEffort: "high" };
+    for (const mode of ["default", "plan"] as const) {
+      NodeAssert.ok(
+        buildCodexDeveloperInstructions(mode, runtime, false).includes(
+          T3_MEDIA_RENDERING_INSTRUCTIONS,
+        ),
+      );
+    }
   });
 
   it("varies with the model and effort of each turn", () => {

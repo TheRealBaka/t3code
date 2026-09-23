@@ -64,6 +64,7 @@ import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { resolveClaudeSdkExecutablePath } from "../provider/Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { T3_MEDIA_RENDERING_INSTRUCTIONS } from "../provider/MediaRenderingInstructions.ts";
 import * as ModelManifest from "../provider/ModelManifest.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import * as ProviderSessionDirectory from "../provider/Services/ProviderSessionDirectory.ts";
@@ -597,7 +598,11 @@ export const make = Effect.gen(function* () {
       ...(apiModelId ? { model: apiModelId } : {}),
       ...(effort ? { effort: effort as unknown as NonNullable<ClaudeQueryOptions["effort"]> } : {}),
       pathToClaudeCodeExecutable: params.instance.executablePath,
-      systemPrompt: { type: "preset", preset: "claude_code" },
+      systemPrompt: {
+        type: "preset",
+        preset: "claude_code",
+        append: T3_MEDIA_RENDERING_INSTRUCTIONS,
+      },
       settingSources: [...SIDE_CHAT_SETTING_SOURCES],
       resume,
       ...(params.entry.forkSessionId === undefined ? { forkSession: true } : {}),

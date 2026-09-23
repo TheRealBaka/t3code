@@ -20,6 +20,7 @@ import { ServerConfig } from "../../config.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { makePiAgentAdapter } from "./PiAgentAdapter.ts";
 import type { ProviderAdapterError } from "../Errors.ts";
+import { T3_MEDIA_RENDERING_INSTRUCTIONS } from "../MediaRenderingInstructions.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { PiRpcClientError, type PiRpcClient, type PiRpcClientOptions } from "../pi/PiRpcClient.ts";
 import type { PiRpcCommand, PiRpcEnvelope, PiRpcResponse } from "../pi/PiRpcProtocol.ts";
@@ -134,15 +135,25 @@ it.effect("resumes, streams a turn, and settles only on agent_settled", () =>
       sessionId: "pi-session-1",
       lastEntryId: "entry-9",
     });
-    assert.deepEqual((yield* Ref.get(spawnOptions))?.args, [
+    const spawnArgs = (yield* Ref.get(spawnOptions))?.args ?? [];
+    assert.deepEqual(spawnArgs, [
       "--mode",
       "rpc",
       "--approve",
       "--append-system-prompt",
       "You are running inside T3 Code. For multi-step work that uses tools, communicate before acting: send a concise preamble explaining what you will do, then provide brief milestone updates before each substantial tool batch or after roughly a minute of quiet work. Keep updates concrete and avoid narrating trivial actions. For simple answers that need no tools, answer directly.",
+      "--append-system-prompt",
+      T3_MEDIA_RENDERING_INSTRUCTIONS,
       "--session-dir",
       "/tmp/pi-sessions",
     ]);
+    // Windows runs an npm-installed pi.cmd through cmd.exe, which truncates an
+    // argument at its first newline and strips double quotes.
+    for (const [index, arg] of spawnArgs.entries()) {
+      if (spawnArgs[index - 1] === "--append-system-prompt") {
+        assert.notMatch(arg, /[\r\n"]/);
+      }
+    }
     assert.equal((yield* Ref.get(spawnOptions))?.binaryPath, expandHomePath("~/.local/bin/pi"));
     assert.equal((yield* Ref.get(spawnOptions))?.env?.PI_CODING_AGENT_DIR, "/tmp/pi-profile");
 
