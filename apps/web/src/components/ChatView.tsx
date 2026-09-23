@@ -222,6 +222,7 @@ import {
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
+import { useWindowFocused } from "../hooks/useWindowFocused";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { confirmTerminalClose, isTerminalCloseConfirmPending } from "../lib/terminalCloseConfirm";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
@@ -1828,23 +1829,29 @@ function ChatViewContent(props: ChatViewProps) {
   const activeRunningTurnId =
     (activeThread?.session?.status === "running" ? activeThread.session.activeTurnId : null) ??
     (activeLatestTurn?.state === "running" ? activeLatestTurn.turnId : null);
-  // Reading a finished thread clears the sidebar's Done badge. The visit is
-  // stamped at the turn's completion time — not now/updatedAt — so it clears
-  // exactly the completion the user is looking at: a wake or completion that
-  // lands later still gets its signal (markThreadVisited never moves the
-  // timestamp backwards).
+  // Reading a finished thread clears the sidebar's Done badge and the app icon
+  // badge. The visit is stamped at the turn's completion time — not
+  // now/updatedAt — so it clears exactly the completion the user is looking
+  // at: a wake or completion that lands later still gets its signal
+  // (markThreadVisited never moves the timestamp backwards). Before the first
+  // completion the thread's creation time is stamped, so a turn that finishes
+  // after the user moves on still reads as new. Nothing is stamped while the
+  // window is in the background: a turn that finishes while the user is in
+  // another app stays unread until they come back.
+  const windowFocused = useWindowFocused();
   useEffect(() => {
-    const completedAt = serverThread?.latestTurn?.completedAt;
-    if (!serverThread?.id || !completedAt) return;
+    if (!serverThread?.id || !windowFocused) return;
     markThreadVisited(
       scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)),
-      completedAt,
+      serverThread.latestTurn?.completedAt ?? serverThread.createdAt,
     );
   }, [
     markThreadVisited,
+    serverThread?.createdAt,
     serverThread?.environmentId,
     serverThread?.id,
     serverThread?.latestTurn?.completedAt,
+    windowFocused,
   ]);
   useEffect(() => {
     setMountedTerminalThreadKeys((currentThreadIds) => {

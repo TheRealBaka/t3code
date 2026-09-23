@@ -72,6 +72,8 @@ export class ElectronApp extends Context.Service<
     ) => Effect.Effect<boolean>;
     readonly setDesktopName: (desktopName: string) => Effect.Effect<void>;
     readonly setDockIcon: (iconPath: string) => Effect.Effect<void>;
+    /** macOS dock and Linux launcher badge; a no-op on Windows. */
+    readonly setBadgeCount: (count: number) => Effect.Effect<void>;
     readonly appendCommandLineSwitch: (switchName: string, value?: string) => Effect.Effect<void>;
     readonly onBeforeQuitForUpdate: (
       listener: () => void,
@@ -184,6 +186,10 @@ export const make = ElectronApp.of({
   setDockIcon: (iconPath) =>
     Effect.sync(() => {
       Electron.app.dock?.setIcon(iconPath);
+    }),
+  setBadgeCount: (count) =>
+    Effect.sync(() => {
+      Electron.app.setBadgeCount(count);
     }),
   appendCommandLineSwitch: (switchName, value) =>
     Effect.sync(() => {

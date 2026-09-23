@@ -1137,6 +1137,11 @@ export interface DesktopBridge {
   ) => Promise<T | null>;
   openExternal: (url: string) => Promise<boolean>;
   /**
+   * Shows `count` on the app icon (macOS dock, Linux launcher, Windows taskbar
+   * overlay); 0 clears it. Optional: older desktop builds lack it.
+   */
+  setAppBadgeCount?: (count: number) => Promise<void>;
+  /**
    * Probe this desktop machine for installed remote-capable editor CLIs
    * (used for remote open-in-editor deep links). Optional: older desktop
    * builds lack it; callers fall back to VS Code only.

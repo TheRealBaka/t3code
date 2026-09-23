@@ -30,6 +30,28 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
   return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
 }
 
+// Windows taskbar overlays render at 16px, so counts past 9 collapse to "9+".
+// Drawn here because the main process has no canvas.
+function drawWindowsBadgeOverlay(count: number): string | undefined {
+  const size = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) return undefined;
+  const label = count > 9 ? "9+" : String(count);
+  context.fillStyle = "#e5484d";
+  context.beginPath();
+  context.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = "#ffffff";
+  context.font = `bold ${label.length > 1 ? 18 : 22}px "Segoe UI", sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(label, size / 2, size / 2 + 1);
+  return canvas.toDataURL("image/png");
+}
+
 contextBridge.exposeInMainWorld("desktopBridge", {
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_APP_BRANDING_CHANNEL);
@@ -115,6 +137,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ...(position === undefined ? {} : { position }),
     }),
   openExternal: (url: string) => ipcRenderer.invoke(IpcChannels.OPEN_EXTERNAL_CHANNEL, url),
+  setAppBadgeCount: (count) => {
+    const overlayDataUrl =
+      clientPlatform === "win32" && count > 0 ? drawWindowsBadgeOverlay(count) : undefined;
+    return ipcRenderer.invoke(IpcChannels.SET_APP_BADGE_COUNT_CHANNEL, {
+      count,
+      ...(overlayDataUrl === undefined ? {} : { overlayDataUrl }),
+    });
+  },
   probeRemoteEditors: () => ipcRenderer.invoke(IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL, undefined),
   onMenuAction: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, action: unknown) => {

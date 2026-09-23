@@ -298,6 +298,39 @@ export const openExternal = DesktopIpc.makeIpcMethod({
   }),
 });
 
+const AppBadgeCountInput = Schema.Struct({
+  count: Schema.Number,
+  // Windows only: the preload draws the numbered overlay, since the main
+  // process has no canvas to render text with.
+  overlayDataUrl: Schema.optionalKey(Schema.String),
+});
+
+export const setAppBadgeCount = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SET_APP_BADGE_COUNT_CHANNEL,
+  payload: AppBadgeCountInput,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.setAppBadgeCount")(function* (input) {
+    const count = Number.isFinite(input.count) ? Math.max(0, Math.floor(input.count)) : 0;
+    const environment = yield* DesktopEnvironment.DesktopEnvironment;
+    if (environment.platform !== "win32") {
+      const electronApp = yield* ElectronApp.ElectronApp;
+      yield* electronApp.setBadgeCount(count);
+      return;
+    }
+    const electronWindow = yield* ElectronWindow.ElectronWindow;
+    const window = yield* electronWindow.main;
+    if (Option.isNone(window)) {
+      return;
+    }
+    const overlay = count > 0 ? (input.overlayDataUrl ?? null) : null;
+    yield* electronWindow.setOverlayIcon(
+      window.value,
+      overlay,
+      overlay === null ? "" : `${count} finished ${count === 1 ? "thread" : "threads"}`,
+    );
+  }),
+});
+
 export const probeRemoteEditors = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PROBE_REMOTE_EDITORS_CHANNEL,
   payload: Schema.Undefined,

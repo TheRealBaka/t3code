@@ -39,6 +39,7 @@ const ElectronWindowOperation = Schema.Literals([
   "reveal-window",
   "send-window-message",
   "destroy-window",
+  "set-overlay-icon",
 ]);
 
 export class ElectronWindowCreateError extends Schema.TaggedErrorClass<ElectronWindowCreateError>()(
@@ -89,6 +90,12 @@ export class ElectronWindow extends Context.Service<
     readonly setMain: (window: Electron.BrowserWindow) => Effect.Effect<void>;
     readonly clearMain: (window: Option.Option<Electron.BrowserWindow>) => Effect.Effect<void>;
     readonly reveal: (window: Electron.BrowserWindow) => Effect.Effect<void>;
+    /** Windows taskbar overlay from a PNG data URL; null clears it. */
+    readonly setOverlayIcon: (
+      window: Electron.BrowserWindow,
+      pngDataUrl: string | null,
+      description: string,
+    ) => Effect.Effect<void>;
     readonly sendAll: (channel: string, ...args: readonly unknown[]) => Effect.Effect<void>;
     readonly destroyAll: Effect.Effect<void>;
     readonly syncAllAppearance: <E, R>(
@@ -233,6 +240,26 @@ export const make = Effect.gen(function* () {
         catch: (cause) =>
           new ElectronWindowOperationError({
             operation: "reveal-window",
+            platform,
+            windowId: window.id,
+            channel: null,
+            cause,
+          }),
+      }).pipe(Effect.orDie),
+    setOverlayIcon: (window, pngDataUrl, description) =>
+      Effect.try({
+        try: () => {
+          if (window.isDestroyed()) {
+            return;
+          }
+          window.setOverlayIcon(
+            pngDataUrl === null ? null : Electron.nativeImage.createFromDataURL(pngDataUrl),
+            description,
+          );
+        },
+        catch: (cause) =>
+          new ElectronWindowOperationError({
+            operation: "set-overlay-icon",
             platform,
             windowId: window.id,
             channel: null,

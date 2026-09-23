@@ -98,6 +98,7 @@ function makeElectronWindowLayer(window: ReturnType<typeof makeTestWindow>["wind
       setMain: () => Effect.void,
       clearMain: () => Effect.void,
       reveal: () => Effect.void,
+      setOverlayIcon: () => Effect.void,
       sendAll: () => Effect.void,
       destroyAll: Effect.void,
       syncAllAppearance: () => Effect.void,

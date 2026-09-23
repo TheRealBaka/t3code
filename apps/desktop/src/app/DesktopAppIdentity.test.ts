@@ -64,6 +64,7 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
       Effect.sync(() => {
         calls.setDockIcon.push(iconPath);
       }),
+    setBadgeCount: () => Effect.void,
     appendCommandLineSwitch: () => Effect.void,
     onBeforeQuitForUpdate: () => Effect.void,
     removeCommandLineSwitch: () => Effect.void,
