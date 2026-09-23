@@ -56,6 +56,7 @@ import React, {
   useCallback,
   memo,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -2039,6 +2040,22 @@ function ChatMarkdown({
     },
     [resolveThreadPullRequest, threadRef, updateThreadMetadata],
   );
+  // Link clicks and context menus read these when they run. Their identities
+  // follow server config and project updates (every provider status refresh
+  // replaces the config), and depending on them would rebuild the renderers
+  // below, which remounts the rendered text and drops a selection in it.
+  const linkActionsRef = useRef({
+    openChangeRequestLink,
+    resolveThreadPullRequest,
+    updateThreadPullRequestLink,
+  });
+  useLayoutEffect(() => {
+    linkActionsRef.current = {
+      openChangeRequestLink,
+      resolveThreadPullRequest,
+      updateThreadPullRequestLink,
+    };
+  }, [openChangeRequestLink, resolveThreadPullRequest, updateThreadPullRequestLink]);
   const openExternalLinkInPreview = useCallback(
     (url: string) => {
       if (!threadRef) {
@@ -2311,7 +2328,7 @@ function ChatMarkdown({
                 // conversation instead of in a browser: it is the thing being talked about, and
                 // the panel it opens offers the browser as one of its actions. Anything else is
                 // an ordinary link and keeps the `_blank` the shell already handles.
-                if (href) openChangeRequestLink(event, href);
+                if (href) linkActionsRef.current.openChangeRequestLink(event, href);
               }}
               onContextMenu={(event) => {
                 if (!href || !faviconHost) return;
@@ -2319,7 +2336,8 @@ function ChatMarkdown({
                 event.stopPropagation();
                 const api = readLocalApi();
                 if (!api) return;
-                const pullRequest = resolveThreadPullRequest(href);
+                const linkActions = linkActionsRef.current;
+                const pullRequest = linkActions.resolveThreadPullRequest(href);
                 const currentPullRequest =
                   threadRef === undefined ? null : readThreadShell(threadRef)?.linkedPullRequest;
                 const threadLinkAction =
@@ -2346,7 +2364,7 @@ function ChatMarkdown({
                   },
                   openExternal: (target) => api.shell.openExternal(target),
                   copyLink: (target) => writeTextToClipboard(target, "link"),
-                  updateThreadLink: updateThreadPullRequestLink,
+                  updateThreadLink: linkActions.updateThreadPullRequestLink,
                   reportFailure: (operation, cause) => {
                     reportMarkdownActionFailure({ operation, target: href }, cause);
                     if (
@@ -2533,18 +2551,15 @@ function ChatMarkdown({
     onImageExpand,
     openFileInPanel,
     openInPreferredEditor,
-    openChangeRequestLink,
     openExternalLinkInPreview,
     openMarkdownFileInPreview,
     preferredEditorMenuLabel,
-    resolveThreadPullRequest,
     resolvedTheme,
     revealMarkdownFileInFileManager,
     revealInFileManagerLabel,
     skills,
     text,
     threadRef,
-    updateThreadPullRequestLink,
   ]);
   /* eslint-enable react/no-unstable-nested-components */
 

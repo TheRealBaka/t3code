@@ -15,8 +15,12 @@ import {
   buildChatReplyComment,
   chatReplyCommentMessageId,
   chatReplyCommentNumber,
+  clearReplyCommentDraft,
+  findQuoteRange,
   normalizeQuoteText,
   quoteTopOffset,
+  readReplyCommentDraft,
+  saveReplyCommentDraft,
   useReplyCommentFocusStore,
 } from "~/chatReplyComments";
 import ChatMarkdown from "~/components/ChatMarkdown";
@@ -52,7 +56,10 @@ const FLOATING_GAP = 6;
 
 interface ReplySelection {
   readonly quote: string;
-  /** The part of the document selection that lies inside this reply. */
+  /**
+   * The part of the document selection that lies inside this reply, or the
+   * quote found again after the reply's text was re-rendered.
+   */
   readonly range: Range;
 }
 
@@ -123,6 +130,26 @@ function floatingPosition(range: Range, width: number, height: number): Floating
   const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - height - VIEWPORT_MARGIN);
   const top = above >= VIEWPORT_MARGIN ? above : Math.min(last.bottom + FLOATING_GAP, maxTop);
   return { left: Math.round(left), top: Math.round(top) };
+}
+
+/**
+ * Whether a saved range still covers rendered text. When React replaces the
+ * reply's DOM under it (a remount, new markdown renderers), the removed text
+ * nodes collapse the live range and it has nothing left to follow.
+ */
+function rangeHasBoxes(range: Range): boolean {
+  if (range.collapsed || !range.commonAncestorContainer.isConnected) return false;
+  const rect = range.getBoundingClientRect();
+  return rect.width > 0 || rect.height > 0;
+}
+
+/** Anchors an open form again: to the quote found again in the reply, or to the reply itself. */
+function reanchorRange(container: HTMLElement, quote: string): Range {
+  const found = findQuoteRange(container, quote);
+  if (found && rangeHasBoxes(found)) return found;
+  const whole = document.createRange();
+  whole.selectNode(container);
+  return whole;
 }
 
 /**
@@ -217,6 +244,7 @@ export function AssistantReplyComments(props: {
   const [editText, setEditText] = useState<string | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const formRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // Mirrors of the two pieces of state the document listeners read, so their
   // callbacks stay stable and never see a stale closure.
   const selectionRef = useRef<ReplySelection | null>(null);
@@ -248,10 +276,29 @@ export function AssistantReplyComments(props: {
   }, [focusedCommentId]);
 
   const closeForm = useCallback(() => {
+    clearReplyCommentDraft(messageId);
     applyComposing(false);
     applySelection(null);
     setDraftText("");
-  }, [applyComposing, applySelection]);
+  }, [applyComposing, applySelection, messageId]);
+
+  const startComposing = useCallback(() => {
+    const current = selectionRef.current;
+    if (!current) return;
+    saveReplyCommentDraft({ messageId, quote: current.quote, text: "" });
+    applyComposing(true);
+  }, [applyComposing, messageId]);
+
+  // A draft left behind when this reply unmounted (a virtualized row, a folded
+  // turn) reopens the form with its quote and text.
+  useLayoutEffect(() => {
+    const draft = readReplyCommentDraft();
+    const container = containerRef.current;
+    if (draft?.messageId !== messageId || !container) return;
+    setDraftText(draft.text);
+    applySelection({ quote: draft.quote, range: reanchorRange(container, draft.quote) });
+    applyComposing(true);
+  }, [applyComposing, applySelection, containerRef, messageId]);
 
   const evaluateSelection = useCallback(() => {
     // The open form owns the quote; the caret has moved into its textarea.
@@ -301,23 +348,36 @@ export function AssistantReplyComments(props: {
   // Floating UI is portalled to the body, so viewport coordinates hold even
   // inside transformed or contained ancestors such as the resizable panels.
   const updateFloatingPosition = useCallback(() => {
-    const current = selectionRef.current;
+    let current = selectionRef.current;
     if (!current) {
       setFloating(null);
       return;
     }
-    const element = composingRef.current ? formRef.current : toolbarRef.current;
-    const width = element?.offsetWidth || (composingRef.current ? FORM_WIDTH : TOOLBAR_WIDTH);
-    const height = element?.offsetHeight || (composingRef.current ? FORM_HEIGHT : TOOLBAR_HEIGHT);
-    const next = floatingPosition(current.range, width, height);
+    const isComposing = composingRef.current;
+    const container = containerRef.current;
+    if (isComposing && container && !rangeHasBoxes(current.range)) {
+      const range = reanchorRange(container, current.quote);
+      if (rangeHasBoxes(range)) {
+        current = { quote: current.quote, range };
+        applySelection(current);
+      }
+    }
+    const element = isComposing ? formRef.current : toolbarRef.current;
+    const width = element?.offsetWidth || (isComposing ? FORM_WIDTH : TOOLBAR_WIDTH);
+    const height = element?.offsetHeight || (isComposing ? FORM_HEIGHT : TOOLBAR_HEIGHT);
+    const placed = floatingPosition(current.range, width, height);
     setFloating((previous) => {
+      // The form never vanishes under the user's typing: while its anchor is
+      // out of view (the timeline following a working agent, a scroll) it
+      // stays where it last was. The toolbar hides.
+      const next = placed ?? (isComposing ? previous : null);
       if (previous === next) return previous;
       if (previous && next && previous.left === next.left && previous.top === next.top) {
         return previous;
       }
       return next;
     });
-  }, []);
+  }, [applySelection, containerRef]);
 
   useLayoutEffect(() => {
     updateFloatingPosition();
@@ -325,7 +385,11 @@ export function AssistantReplyComments(props: {
 
   useEffect(() => {
     if (!selection) return;
-    const handle = () => updateFloatingPosition();
+    const handle = (event: Event) => {
+      // The form's own textarea scrolls as the comment grows; that never moves the anchor.
+      if (isInsideOwnUi(event.target)) return;
+      updateFloatingPosition();
+    };
     // Capture phase: the reply scrolls inside a nested scroller, not the window.
     document.addEventListener("scroll", handle, true);
     window.addEventListener("resize", handle);
@@ -335,15 +399,26 @@ export function AssistantReplyComments(props: {
     };
   }, [selection, updateFloatingPosition]);
 
-  // Clicking anywhere outside the form abandons it.
+  // The form is invisible, and so unfocusable, until it is placed; focus it
+  // then, with the caret after any restored text.
+  const formShown = composing && selection !== null && floating !== null;
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!formShown || !textarea || textarea === document.activeElement) return;
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, [formShown]);
+
+  // Clicking anywhere outside the shown form abandons it. A restored form
+  // still waiting for its reply to scroll into view is not abandoned unseen.
   useEffect(() => {
-    if (!composing) return;
+    if (!formShown) return;
     const handleMouseDown = (event: MouseEvent) => {
       if (!isInsideOwnUi(event.target)) closeForm();
     };
     document.addEventListener("mousedown", handleMouseDown);
     return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, [closeForm, composing]);
+  }, [closeForm, formShown]);
 
   // Place each bubble beside the first line of its quote; stack unmatched ones at the top.
   useLayoutEffect(() => {
@@ -558,7 +633,7 @@ export function AssistantReplyComments(props: {
               <button
                 type="button"
                 className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium whitespace-nowrap hover:bg-muted"
-                onClick={() => applyComposing(true)}
+                onClick={startComposing}
               >
                 <MessageCircle className="size-3.5" aria-hidden />
                 Add to chat
@@ -592,12 +667,16 @@ export function AssistantReplyComments(props: {
                 <ChatMarkdown text={selection.quote} cwd={undefined} threadRef={threadRef} />
               </blockquote>
               <textarea
-                autoFocus
+                ref={textareaRef}
                 rows={2}
                 value={draftText}
                 placeholder="Your comment"
                 className="w-full resize-none rounded-md border border-border bg-background px-2 py-1 text-xs outline-none focus:border-ring"
-                onChange={(event) => setDraftText(event.target.value)}
+                onChange={(event) => {
+                  const text = event.target.value;
+                  setDraftText(text);
+                  saveReplyCommentDraft({ messageId, quote: selection.quote, text });
+                }}
                 onKeyDown={handleFormKeyDown}
               />
               <div className="flex justify-end gap-1.5">

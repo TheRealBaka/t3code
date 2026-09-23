@@ -75,20 +75,28 @@ export function normalizeQuoteText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+interface TextPosition {
+  /** Index into the searched texts. */
+  readonly index: number;
+  readonly offset: number;
+}
+
 /**
- * Finds the rendered quote inside a container and returns its top offset
- * relative to the container, or null when the text is no longer present.
+ * Whitespace-insensitive search for a quote's searchable part across a run of
+ * text nodes' contents. Returns where it starts and ends, or null when the
+ * text is not there.
  */
-export function quoteTopOffset(container: HTMLElement, quote: string): number | null {
+export function locateQuote(
+  texts: ReadonlyArray<string>,
+  quote: string,
+): { readonly start: TextPosition; readonly end: TextPosition } | null {
   const needle = normalizeQuoteText(quoteSearchNeedle(quote));
   if (needle.length === 0) return null;
-  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-  const nodes: Array<{ node: Text; start: number }> = [];
+  const starts: number[] = [];
   let haystack = "";
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    const text = node as Text;
-    nodes.push({ node: text, start: haystack.length });
-    haystack += text.data;
+  for (const text of texts) {
+    starts.push(haystack.length);
+    haystack += text;
   }
   const normalized = haystack.replace(/\s+/g, " ");
   // Map indexes in the collapsed string back to the raw string.
@@ -102,17 +110,81 @@ export function quoteTopOffset(container: HTMLElement, quote: string): number | 
   }
   const foundAt = normalized.indexOf(needle);
   if (foundAt < 0) return null;
-  const rawIndex = rawIndexByNormalized[foundAt];
-  if (rawIndex === undefined) return null;
-  const entry = [...nodes].reverse().find((candidate) => candidate.start <= rawIndex);
-  if (!entry) return null;
+  const rawStart = rawIndexByNormalized[foundAt];
+  const rawLast = rawIndexByNormalized[foundAt + needle.length - 1];
+  if (rawStart === undefined || rawLast === undefined) return null;
+  // The last text starting at or before a character holds it.
+  const indexOf = (rawIndex: number) => starts.findLastIndex((start) => start <= rawIndex);
+  const startIndex = indexOf(rawStart);
+  const endIndex = indexOf(rawLast);
+  if (startIndex < 0 || endIndex < 0) return null;
+  return {
+    start: { index: startIndex, offset: rawStart - (starts[startIndex] ?? 0) },
+    end: { index: endIndex, offset: rawLast - (starts[endIndex] ?? 0) + 1 },
+  };
+}
+
+/** Finds the rendered quote inside a container, or null when the text is no longer present. */
+export function findQuoteRange(container: HTMLElement, quote: string): Range | null {
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    nodes.push(node as Text);
+  }
+  const location = locateQuote(
+    nodes.map((node) => node.data),
+    quote,
+  );
+  const startNode = location ? nodes[location.start.index] : undefined;
+  const endNode = location ? nodes[location.end.index] : undefined;
+  if (!location || !startNode || !endNode) return null;
   const range = document.createRange();
-  const offset = Math.min(rawIndex - entry.start, entry.node.data.length);
-  range.setStart(entry.node, offset);
-  range.setEnd(entry.node, offset);
+  range.setStart(startNode, location.start.offset);
+  range.setEnd(endNode, location.end.offset);
+  return range;
+}
+
+/**
+ * Finds the rendered quote inside a container and returns its top offset
+ * relative to the container, or null when the text is no longer present.
+ */
+export function quoteTopOffset(container: HTMLElement, quote: string): number | null {
+  const range = findQuoteRange(container, quote);
+  if (!range) return null;
+  range.collapse(true);
   const rect = range.getBoundingClientRect();
   const containerRect = container.getBoundingClientRect();
   return rect.top - containerRect.top;
+}
+
+/** The reply comment being written: its quote and the text typed so far. */
+export interface ReplyCommentDraft {
+  readonly messageId: string;
+  readonly quote: string;
+  readonly text: string;
+}
+
+/**
+ * The open comment form's draft, held outside the reply so a remount of the
+ * reply (a virtualized row scrolling back in, a folded turn expanding again)
+ * reopens the form instead of dropping the text. Only one form is open at a
+ * time, so one slot is enough; closing the form clears it.
+ */
+let pendingReplyCommentDraft: ReplyCommentDraft | null = null;
+
+export function readReplyCommentDraft(): ReplyCommentDraft | null {
+  return pendingReplyCommentDraft;
+}
+
+export function saveReplyCommentDraft(draft: ReplyCommentDraft): void {
+  pendingReplyCommentDraft = draft;
+}
+
+/** Clears the draft only if it belongs to this reply; another reply's draft stays. */
+export function clearReplyCommentDraft(messageId: string): void {
+  if (pendingReplyCommentDraft?.messageId === messageId) {
+    pendingReplyCommentDraft = null;
+  }
 }
 
 /** Chip-to-reply signal: the composer asks the reply that owns a comment to open it. */

@@ -129,6 +129,7 @@ import {
 } from "~/lib/previewAnnotation";
 import { cn } from "~/lib/utils";
 import { AssistantReplyComments } from "./AssistantReplyComments";
+import { readReplyCommentDraft } from "~/chatReplyComments";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
@@ -216,7 +217,7 @@ function TimelineLoadEarlierHeader({
   );
 }
 const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
-const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const EMPTY_TIMELINE_SKILLS: TimelineRowSharedState["skills"] = [];
 const TIMELINE_MAINTAIN_SCROLL_AT_END = {
   animated: false,
   on: {
@@ -225,6 +226,37 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
     layout: true,
   },
 } as const;
+
+/** Skill chips read only these fields, so lists equal in them render the same. */
+function sameTimelineSkills(
+  left: TimelineRowSharedState["skills"],
+  right: TimelineRowSharedState["skills"],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (skill, index) =>
+        skill.name === right[index]?.name && skill.displayName === right[index]?.displayName,
+    )
+  );
+}
+
+/** Whether the reply holding the open comment draft belongs to this turn. */
+function turnHoldsReplyCommentDraft(
+  timelineEntries: ReturnType<typeof deriveTimelineEntries>,
+  turnId: TurnId,
+): boolean {
+  const draft = readReplyCommentDraft();
+  return (
+    draft !== null &&
+    timelineEntries.some(
+      (entry) =>
+        entry.kind === "message" &&
+        entry.message.id === draft.messageId &&
+        entry.message.turnId === turnId,
+    )
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -410,6 +442,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   // An in-session interrupt leaves its turn expanded so the user keeps their
   // place; the next turn (or a reload, since this is local state) folds it.
+  // So does a turn that settles while the user is commenting on one of its
+  // replies, so the fold does not take the reply away from under the form.
   const previousLatestTurnRef = useRef(latestTurn);
   useEffect(() => {
     const previous = previousLatestTurnRef.current;
@@ -418,7 +452,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return;
     }
     if (latestTurn.turnId === previous.turnId) {
-      if (previous.state === "running" && latestTurn.state === "interrupted") {
+      if (
+        previous.state === "running" &&
+        (latestTurn.state === "interrupted" ||
+          (latestTurn.state !== "running" &&
+            turnHoldsReplyCommentDraft(timelineEntries, latestTurn.turnId)))
+      ) {
         setExpandedTurnIds((existing) => {
           const next = new Set(existing);
           next.add(latestTurn.turnId);
@@ -547,15 +586,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [timelineViewportElement, rows.length]);
 
+  // Rows hand these to every reply's markdown, whose renderers rebuild when
+  // they change and remount the reply's text, dropping a selection or comment
+  // anchored in it. Neither may change identity on unrelated updates: the
+  // shared state recomputes on every thread activity, and each provider status
+  // refresh resends an equal skill list as a new array.
+  const threadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
+  const [stableSkills, setStableSkills] = useState(skills);
+  if (stableSkills !== skills && !sameTimelineSkills(stableSkills, skills)) {
+    setStableSkills(skills);
+  }
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       timestampFormat,
       routeThreadKey,
-      threadRef: parseScopedThreadKey(routeThreadKey),
+      threadRef,
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
-      skills,
+      skills: stableSkills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onUseArtifactTemplate,
@@ -571,10 +620,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [
       timestampFormat,
       routeThreadKey,
+      threadRef,
       markdownCwd,
       resolvedTheme,
       workspaceRoot,
-      skills,
+      stableSkills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
       onUseArtifactTemplate,
