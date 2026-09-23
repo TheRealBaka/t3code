@@ -23,6 +23,7 @@ import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
@@ -62,6 +63,13 @@ const DownloadProgressInfo = Schema.Struct({
   percent: Schema.Number,
 });
 const decodeAppUpdateYmlConfig = Schema.decodeUnknownEffect(AppUpdateYmlConfig);
+// Stamped by the desktop build script into the packaged app's package.json.
+const AppPackageUpdateMetadata = Schema.Struct({
+  t3codeManualMacUpdates: Schema.optional(Schema.Boolean),
+});
+const decodeAppPackageUpdateMetadata = Schema.decodeEffect(
+  Schema.fromJsonString(AppPackageUpdateMetadata),
+);
 const decodeUpdateInfo = Schema.decodeUnknownEffect(UpdateInfo);
 const decodeDownloadProgressInfo = Schema.decodeUnknownEffect(DownloadProgressInfo);
 
@@ -242,6 +250,21 @@ function getAutoUpdateDisabledReason(args: {
   return null;
 }
 
+/**
+ * Squirrel.Mac only installs an update signed by the same Apple Developer ID
+ * as the running app, so builds without one send the user to the release page
+ * to download it instead. Null when the app can update itself.
+ */
+function resolveManualInstallUrl(
+  manualMacUpdates: boolean,
+  appUpdateYmlConfig: Option.Option<AppUpdateYmlConfig>,
+): string | null {
+  if (!manualMacUpdates || Option.isNone(appUpdateYmlConfig)) return null;
+  const { provider, owner, repo } = appUpdateYmlConfig.value;
+  if (provider !== "github" || !owner || !repo) return null;
+  return `https://github.com/${owner}/${repo}/releases/latest`;
+}
+
 function isArm64HostRunningIntelBuild(runtimeInfo: DesktopRuntimeInfo): boolean {
   return runtimeInfo.hostArch === "arm64" && runtimeInfo.appArch === "x64";
 }
@@ -250,6 +273,7 @@ export const make = Effect.gen(function* () {
   const config = yield* DesktopConfig.DesktopConfig;
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const desktopState = yield* DesktopState.DesktopState;
+  const electronShell = yield* ElectronShell.ElectronShell;
   const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
@@ -257,6 +281,7 @@ export const make = Effect.gen(function* () {
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
+  const manualInstallUrlRef = yield* Ref.make<string | null>(null);
   const activeUpdateActionRef = yield* Ref.make<Option.Option<UpdateAction>>(Option.none());
   const updaterConfiguredRef = yield* Ref.make(false);
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
@@ -294,6 +319,15 @@ export const make = Effect.gen(function* () {
       }),
     ),
   );
+
+  const readManualMacUpdates =
+    environment.platform === "darwin"
+      ? fileSystem.readFileString(environment.path.join(environment.appRoot, "package.json")).pipe(
+          Effect.flatMap(decodeAppPackageUpdateMetadata),
+          Effect.map((metadata) => metadata.t3codeManualMacUpdates === true),
+          Effect.orElseSucceed(() => false),
+        )
+      : Effect.succeed(false);
 
   const hasUpdateFeedConfig = Ref.get(appUpdateYmlConfigRef).pipe(
     Effect.map((appUpdateYmlConfig) => Option.isSome(appUpdateYmlConfig) || config.mockUpdates),
@@ -403,6 +437,15 @@ export const make = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
     if (!(yield* Ref.get(updaterConfiguredRef)) || state.status !== "available") {
       return { accepted: false, completed: false };
+    }
+
+    const manualInstallUrl = yield* Ref.get(manualInstallUrlRef);
+    if (manualInstallUrl !== null) {
+      yield* logUpdaterInfo("opening release page for manual install", {
+        version: state.availableVersion,
+      });
+      const opened = yield* electronShell.openExternal(manualInstallUrl);
+      return { accepted: opened, completed: false };
     }
 
     if (!(yield* tryStartUpdateAction("download"))) {
@@ -733,6 +776,10 @@ export const make = Effect.gen(function* () {
 
       const appUpdateYmlConfig = yield* readAppUpdateYml;
       yield* Ref.set(appUpdateYmlConfigRef, appUpdateYmlConfig);
+      yield* Ref.set(
+        manualInstallUrlRef,
+        resolveManualInstallUrl(yield* readManualMacUpdates, appUpdateYmlConfig),
+      );
 
       if (config.mockUpdates) {
         yield* electronUpdater.setFeedURL({

@@ -314,7 +314,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }),
   );
 
-  it.effect("omits update feeds for pull request preview builds", () =>
+  it.effect("omits update feeds only for pull request preview builds", () =>
     Effect.gen(function* () {
       const preview = yield* createBuildConfig(
         "mac",
@@ -334,7 +334,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
         undefined,
       );
-      assert.notProperty(forkPreview, "publish");
+      assert.deepStrictEqual(forkPreview.publish, [
+        {
+          provider: "github",
+          owner: "pingdotgg",
+          repo: "t3code",
+          releaseType: "release",
+        },
+      ]);
       assert.equal(forkPreview.productName, "T3 Code++");
       assert.equal(forkPreview.appId, "io.github.therealbaka.t3code.preview");
       const release = yield* createBuildConfig(

@@ -4,14 +4,14 @@ T3 Code++ is an independent, experimental fork of T3 Code. Downloads exist for A
 
 ## Download
 
-1. Visit [GitHub Releases](https://github.com/TheRealBaka/t3code/releases) and open the newest **T3 Code++** prerelease.
+1. Visit [GitHub Releases](https://github.com/TheRealBaka/t3code/releases) and open the newest **T3 Code++** release.
 2. Expand **Assets** and download the file for your machine. The automatically generated **Source code** downloads are not installers.
 
-| Machine | File |
-| --- | --- |
-| Apple Silicon Mac (M1, M2, M3, and later) | `T3-Code-PlusPlus-…-arm64.dmg` |
-| Windows 10/11, 64-bit | `T3-Code-PlusPlus-…-x64.exe` |
-| Linux, 64-bit | `T3-Code-PlusPlus-…-x86_64.AppImage` |
+| Machine                                   | File                                 |
+| ----------------------------------------- | ------------------------------------ |
+| Apple Silicon Mac (M1, M2, M3, and later) | `T3-Code-PlusPlus-…-arm64.dmg`       |
+| Windows 10/11, 64-bit                     | `T3-Code-PlusPlus-…-x64.exe`         |
+| Linux, 64-bit                             | `T3-Code-PlusPlus-…-x86_64.AppImage` |
 
 No official T3 installation is required. The app bundles its server; you do not need to compile anything. An Intel Mac needs an x64 build, which is not published.
 
@@ -81,8 +81,20 @@ If a provider cannot be found, verify it starts in a terminal. Use `command -v c
 - Electron's profile lives under `~/Library/Application Support/t3code-preview` on macOS, `%APPDATA%\t3code-preview` on Windows, and `~/.config/t3code-preview` on Linux.
 - Official T3 conversations and settings are not automatically imported. Existing provider sign-ins may still be reused, because provider credentials belong to the provider rather than the T3 app.
 - If you have explicitly set `T3CODE_HOME`, it overrides the server-data location. Do not point this older fork at a newer official T3 database.
-- To update, fully quit the app, download a newer installer, and install it over the old one (or replace the AppImage). Updates are manual and retain your data. You may need to approve each unsigned download.
+- The app checks this repository for a newer release shortly after it starts and every few minutes after that. When one exists, an update button appears in the sidebar. Updates keep your data.
+  - **Windows and Linux (AppImage):** the button downloads the update. Click it again to restart into the new version.
+  - **macOS:** the app is not signed with an Apple Developer ID, so macOS will not let it replace itself. The button opens the release page instead. Download the new DMG and drag **T3 Code++** into **Applications** again, replacing the old copy. You may need to approve the unsigned app again.
+  - Releases published before automatic updates never check for updates. Install a newer release by hand once, and later releases will reach you in the app.
+  - Setting the environment variable `T3CODE_DISABLE_AUTO_UPDATE=1` turns update checks off.
 - To uninstall, quit the app and remove it: delete the app on macOS, use **Apps → Installed apps** on Windows, or delete the AppImage on Linux. Your data remains available if you reinstall. Do not remove official T3 or provider data as part of uninstalling.
+
+## Finished-thread badge
+
+When an agent finishes a turn in a thread you haven't looked at since, the app icon shows how many such threads are waiting: a number on the Dock icon on macOS, a red number over the taskbar button on Windows, and a launcher badge on Linux desktops that support one (GNOME with a dock extension, KDE). Open the thread to clear it. A thread that finishes while the app is in the background still counts, even if it was already open, until you switch back to the app.
+
+## Images and videos from agents
+
+Claude, Codex, and Pi are told that T3 Code++ shows Markdown images inline. When a screenshot, plot, or generated image or video helps, they embed the file from the project folder and it appears in the conversation. Videos play inline on web and desktop. Files outside the project folder do not display. On a remote server, this takes effect once that server runs a release with this feature.
 
 ## Remote connections
 

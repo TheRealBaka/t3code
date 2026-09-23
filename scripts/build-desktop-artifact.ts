@@ -780,6 +780,9 @@ interface StagePackageJson {
   readonly version: string;
   readonly buildVersion: string;
   readonly t3codeCommitHash: string;
+  // Unsigned macOS builds cannot install updates in place (Squirrel.Mac
+  // requires a Developer ID signature), so the app opens the release page.
+  readonly t3codeManualMacUpdates?: true;
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -2075,8 +2078,10 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
-function isDesktopPreviewVersion(version: string): boolean {
-  return /-(?:pr|preview)\./.test(version);
+// Pull request builds never get an update feed. T3 Code++ preview builds do:
+// installed copies follow the fork's GitHub releases.
+function isPullRequestPreviewVersion(version: string): boolean {
+  return /-pr\./.test(version);
 }
 
 export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
@@ -2160,7 +2165,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
-  if (!isDesktopPreviewVersion(version)) {
+  if (!isPullRequestPreviewVersion(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
     if (publishConfig) {
       buildConfig.publish = [publishConfig];
@@ -3179,6 +3184,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
+    ...(options.platform === "mac" && !options.signed ? { t3codeManualMacUpdates: true } : {}),
     private: true,
     packageManager: rootPackageJson.packageManager,
     description: "T3 Code desktop build",

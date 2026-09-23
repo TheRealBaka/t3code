@@ -47,7 +47,10 @@ jobs:
             apps/desktop/src/app/DesktopEarlyElectronStartup.test.ts \
             apps/desktop/src/app/DesktopClerk.test.ts \
             apps/desktop/src/electron/ElectronProtocol.test.ts \
+            apps/desktop/src/updates/DesktopUpdates.test.ts \
             scripts/build-desktop-artifact.test.ts \
+            apps/server/src/provider/Layers/ClaudeAdapter.test.ts \
+            apps/server/src/provider/Layers/CodexSessionRuntime.test.ts \
             apps/server/src/provider/Drivers/PiAgentDriver.test.ts \
             apps/server/src/provider/Drivers/PiSkillDispatch.test.ts \
             apps/server/src/provider/Layers/PiAgentAdapter.test.ts \
@@ -59,6 +62,9 @@ jobs:
             apps/server/src/provider/Drivers/ClaudeSkills.test.ts \
             apps/web/src/components/usage/usageLimitsFormat.test.ts \
             apps/web/src/selectionQuote.test.ts \
+            apps/web/src/components/appIconBadge.logic.test.ts \
+            apps/web/src/components/desktopUpdate.logic.test.ts \
+            apps/web/src/chatReplyComments.test.ts \
             packages/client-runtime/src/runtimeModeOptions.test.ts
           vp test run apps/server/src/server.test.ts -t 'allows credentialed preflights from t3code-preview'
 
@@ -209,7 +215,8 @@ jobs:
           T3CODE_DESKTOP_SIGNED: "false"
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         # No .env.example copy: cloud login and relay are intentionally unconfigured.
-        # Preview versions omit the updater feed; releases are installed manually.
+        # The updater feed points at this repository's latest GitHub release
+        # (GITHUB_REPOSITORY), so installed copies update themselves.
         run: |
           args=(
             --platform "${{ matrix.platform }}"
@@ -238,7 +245,8 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "io.github.therealbaka.t3code.preview"
           executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
           lipo "$app/Contents/MacOS/$executable" -verify_arch arm64
-          test ! -e "$app/Contents/Resources/app-update.yml"
+          grep -q "repo: t3code" "$app/Contents/Resources/app-update.yml"
+          test -s "release/latest-mac.yml"
           ELECTRON_RUN_AS_NODE=1 T3CODE_HOME="$RUNNER_TEMP/preview-smoke" \
             "$app/Contents/MacOS/$executable" \
             "$app/Contents/Resources/app.asar/apps/server/dist/bin.mjs" --help
@@ -257,7 +265,8 @@ jobs:
           ( cd "$extract" && ./app.AppImage --appimage-extract >/dev/null )
           root="$extract/squashfs-root"
           test -x "$root/t3code-preview"
-          test ! -e "$root/resources/app-update.yml"
+          grep -q "repo: t3code" "$root/resources/app-update.yml"
+          test -s "release/latest-linux.yml"
           ELECTRON_RUN_AS_NODE=1 T3CODE_HOME="$RUNNER_TEMP/preview-smoke" \
             "$root/t3code-preview" \
             "$root/resources/app.asar/apps/server/dist/bin.mjs" --help
@@ -269,6 +278,7 @@ jobs:
           set -euo pipefail
           installer="T3-Code-PlusPlus-${PREVIEW_VERSION}-x64.exe"
           test -s "release/$installer"
+          test -s "release/latest.yml"
           ls -la release
 
       - name: Collect installer and checksum
@@ -277,7 +287,10 @@ jobs:
           set -euo pipefail
           mkdir -p publish
           shopt -s nullglob
-          for file in release/*.dmg release/*.AppImage release/*.exe; do
+          # latest*.yml is the updater feed and *.exe.blockmap enables
+          # differential Windows downloads. The macOS zip is not published:
+          # unsigned macOS builds update through the release page instead.
+          for file in release/*.dmg release/*.AppImage release/*.exe release/*.exe.blockmap release/latest*.yml; do
             cp "$file" publish/
           done
           cd publish
@@ -335,5 +348,5 @@ jobs:
               --target "$GITHUB_SHA" \
               --title "T3 Code++ ${VERSION}" \
               --notes-file docs/user/preview-release-notes.md \
-              --prerelease --latest=false
+              --latest
           fi

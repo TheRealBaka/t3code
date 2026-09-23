@@ -12,10 +12,13 @@ import * as Option from "effect/Option";
 import * as References from "effect/References";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
@@ -32,12 +35,16 @@ interface UpdatesHarnessOptions {
   readonly setDisableDifferentialDownload?: Effect.Effect<void>;
   readonly stopBackend?: Effect.Effect<void>;
   readonly env?: Record<string, string | undefined>;
+  /** Packaged app directory holding package.json and app-update.yml. */
+  readonly appDir?: string;
 }
 
 const flushCallbacks = Effect.yieldNow;
 
 function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
+  let downloadCount = 0;
+  const openedUrls: unknown[] = [];
   let allowDowngrade = false;
   let fullChangelog = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
@@ -83,7 +90,9 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
     }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
-    downloadUpdate: Effect.void,
+    downloadUpdate: Effect.sync(() => {
+      downloadCount += 1;
+    }),
     quitAndInstall: () => Effect.void,
     on: (eventName, listener) =>
       Effect.acquireRelease(
@@ -105,6 +114,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     setMain: () => Effect.void,
     clearMain: () => Effect.void,
     reveal: () => Effect.void,
+    setOverlayIcon: () => Effect.void,
     sendAll: (_channel, state) =>
       Effect.sync(() => {
         sentStates.push(state as DesktopUpdateState);
@@ -112,6 +122,15 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     destroyAll: Effect.void,
     syncAllAppearance: () => Effect.void,
   } satisfies ElectronWindow.ElectronWindow["Service"]);
+
+  const shellLayer = Layer.succeed(ElectronShell.ElectronShell, {
+    openExternal: (url) =>
+      Effect.sync(() => {
+        openedUrls.push(url);
+        return true;
+      }),
+    copyText: () => Effect.void,
+  } satisfies ElectronShell.ElectronShell["Service"]);
 
   const stubBackendInstance: DesktopBackendPool.DesktopBackendInstance = {
     id: DesktopBackendPool.PRIMARY_INSTANCE_ID,
@@ -136,9 +155,9 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     platform: "darwin",
     processArch: "x64",
     appVersion: "1.2.3",
-    appPath: "/repo",
+    appPath: options.appDir ?? "/repo",
     isPackaged: true,
-    resourcesPath: "/missing/resources",
+    resourcesPath: options.appDir ?? "/missing/resources",
     runningUnderArm64Translation: false,
   }).pipe(
     Layer.provide(
@@ -192,6 +211,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
 
   const layer = DesktopUpdates.layer.pipe(
     Layer.provideMerge(updaterLayer),
+    Layer.provideMerge(shellLayer),
     Layer.provideMerge(windowLayer),
     Layer.provideMerge(backendLayer),
     Layer.provideMerge(DesktopState.layer),
@@ -211,6 +231,8 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   return {
     layer,
     checkCount: () => checkCount,
+    downloadCount: () => downloadCount,
+    openedUrls: () => openedUrls,
     feedUrls: () => feedUrls,
     fullChangelog: () => fullChangelog,
     listenerCount: () =>
@@ -622,6 +644,43 @@ describe("DesktopUpdates", () => {
       ),
     );
   });
+
+  it.effect("sends unsigned macOS builds to the release page instead of downloading", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const appDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-updates-app-",
+      });
+      yield* fileSystem.writeFileString(
+        path.join(appDir, "package.json"),
+        `{"t3codeManualMacUpdates":true}`,
+      );
+      yield* fileSystem.writeFileString(
+        path.join(appDir, "app-update.yml"),
+        "provider: github\nowner: TheRealBaka\nrepo: t3code\n",
+      );
+      const harness = makeHarness({ appDir });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-available", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          const result = yield* updates.download;
+          assert.isTrue(result.accepted);
+          assert.isFalse(result.completed);
+          assert.deepStrictEqual(harness.openedUrls(), [
+            "https://github.com/TheRealBaka/t3code/releases/latest",
+          ]);
+          assert.equal(harness.downloadCount(), 0);
+          assert.equal((yield* updates.getState).status, "available");
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 
   it.effect("recovers download state after an unexpected setup failure", () => {
     let disableDifferentialCalls = 0;

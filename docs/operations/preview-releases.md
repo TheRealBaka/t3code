@@ -9,10 +9,10 @@ Push a reviewed commit to `release/preview` on `TheRealBaka/t3code`. The **Previ
 1. `checks` (Ubuntu): installs the locked desktop/server dependency graph, runs the focused feature/packaging tests and the desktop, web, and server typechecks, and resolves the version `0.0.38-preview.<workflow-run-number>`.
 2. `wsl_node_pty` (Ubuntu): builds the Linux `pty.node` that the Windows package bundles for its WSL backend.
 3. `build` (matrix): packages unsigned installers on standard GitHub-hosted runners, stamps the version into release package manifests, inspects each bundle, and writes a per-platform SHA-256 file.
-   - macOS arm64 DMG on `macos-15`: bundle identity, architecture, no updater feed, server `--help` smoke.
-   - Linux x64 AppImage on `ubuntu-24.04`: extracts the image, checks the executable and the absence of an updater feed, server `--help` smoke.
-   - Windows x64 NSIS installer on `windows-2025`: installer present. Windows needs the Spectre-mitigated MSVC libraries for native rebuilds and the WSL prebuild from step 2.
-4. `publish` (Ubuntu): merges the checksum files into one `SHA256SUMS.txt` and publishes a GitHub prerelease tagged `preview-<version>` from that exact commit using the workflow's built-in `GITHUB_TOKEN`.
+   - macOS arm64 DMG on `macos-15`: bundle identity, architecture, updater feed pointing at this repository, `latest-mac.yml`, server `--help` smoke.
+   - Linux x64 AppImage on `ubuntu-24.04`: extracts the image, checks the executable, the updater feed, and `latest-linux.yml`, server `--help` smoke.
+   - Windows x64 NSIS installer on `windows-2025`: installer and `latest.yml` present. Windows needs the Spectre-mitigated MSVC libraries for native rebuilds and the WSL prebuild from step 2.
+4. `publish` (Ubuntu): merges the checksum files into one `SHA256SUMS.txt` and publishes a GitHub release tagged `preview-<version>` from that exact commit, marked as the repository's latest release, using the workflow's built-in `GITHUB_TOKEN`. Assets are the installers, the updater feeds (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`), the Windows `.exe.blockmap` for differential downloads, and the checksums.
 
 No Apple certificate, Apple Developer membership, Windows code-signing certificate, personal access token, cloud credentials, or self-hosted runner is required. GitHub Actions must be enabled on the fork. Standard hosted runner use is free for public repositories under GitHub's public-repository Actions policy; do not substitute paid/larger runners without reviewing billing. Windows builds are the slowest leg; expect the whole run to take roughly 30 to 45 minutes.
 
@@ -28,7 +28,8 @@ The workflow is also manually dispatchable; branch pushes work even when the wor
 - Default server home: `~/.t3-preview`
 - Electron profiles: `t3code-preview` / `T3 Code Preview` (legacy name kept for the profile-migration path), with separate development variants
 - Linux executable, WM class, and desktop entry: `t3code-preview`
-- Versions carrying `-preview.` omit update feeds, including when `GITHUB_REPOSITORY` is set.
+- Update feed: electron-updater's GitHub provider on `GITHUB_REPOSITORY` with release type `release`, so installed apps follow `/releases/latest`. Only `-pr.` versions omit the feed. Every successful push to `release/preview` therefore reaches every installed copy within minutes; treat a push as shipping.
+- macOS builds are unsigned, and Squirrel.Mac refuses to install an update that is not signed by the running app's Developer ID. Unsigned mac builds carry `t3codeManualMacUpdates` in their packaged `package.json`, and their update button opens `/releases/latest` instead of downloading. The zip that electron-builder lists in `latest-mac.yml` is not uploaded. With a Developer ID, sign the mac build, drop that flag, and upload the zip to get in-place mac updates.
 - The workflow does not copy `.env.example`: official Clerk login, relay, and passkey signing configuration are not embedded.
 
 The internal identifiers deliberately kept the `preview` name when the product was renamed to T3 Code++, so existing installs keep their data directories and URL scheme registrations. Renaming them is a migration, not a label change.
@@ -41,7 +42,7 @@ Building an installer does not prove interactive behavior. Have a tester install
 
 The release notes deliberately document macOS Keychain usage-limit support and fork-aware SSH provisioning as limitations. Do not advertise them as verified. Intel macOS, Windows on ARM, and upstream migration are separate follow-up work.
 
-For a bad release, remove its download or mark it clearly as broken, fix the source, and publish a new release. Do not recommend downgrading against data already migrated by a newer release without a backup.
+For a bad release, publish a fixed release as soon as possible: installed apps pick up whatever `/releases/latest` points at. Deleting the bad release makes the previous one latest again, but apps that already updated do not downgrade. Do not recommend downgrading against data already migrated by a newer release without a backup.
 
 ## Local-only material
 

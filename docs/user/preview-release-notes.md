@@ -1,6 +1,6 @@
 ## T3 Code++
 
-Independent fork based on T3 Code 0.0.38, with Pi integration, math and video rendering, reply comments, and Claude side chats.
+Independent fork based on T3 Code 0.0.38, with Pi integration, math and video rendering, reply comments, Claude side chats, a finished-thread count on the app icon, and automatic updates.
 
 ### Install
 
@@ -12,7 +12,7 @@ Download the file for your machine below, then follow the [installation guide](h
 
 Then configure your installed coding provider in **Settings → Providers**.
 
-The app installs alongside official T3, stores data separately, and uses manual updates. Provider subscriptions are not included. These releases target local use; T3 Connect cloud login/relay and automatic installation of the fork over SSH are not included.
+The app installs alongside official T3 and stores data separately. It checks this repository for new releases: Windows and Linux download and install them from inside the app, and on a Mac the update button opens the download page. Releases published before automatic updates need one manual install of a newer release first. Provider subscriptions are not included. These releases target local use; T3 Connect cloud login/relay and automatic installation of the fork over SSH are not included.
 
 ### Limitations
 
