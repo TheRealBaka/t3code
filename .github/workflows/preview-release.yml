@@ -65,7 +65,8 @@ jobs:
             apps/web/src/components/appIconBadge.logic.test.ts \
             apps/web/src/components/desktopUpdate.logic.test.ts \
             apps/web/src/chatReplyComments.test.ts \
-            packages/client-runtime/src/runtimeModeOptions.test.ts
+            packages/client-runtime/src/runtimeModeOptions.test.ts \
+            packages/ssh/src/tunnel.test.ts
           vp test run apps/server/src/server.test.ts -t 'allows credentialed preflights from t3code-preview'
 
       - name: Typecheck release surfaces

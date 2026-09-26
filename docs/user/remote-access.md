@@ -134,6 +134,8 @@ Use this when you want the desktop app to start or reuse T3 Code on another mach
 
 After setup, the renderer connects to a local forwarded HTTP/WebSocket endpoint. The remote host still owns the actual T3 server, projects, files, git state, terminals, and provider sessions.
 
+The remote server keeps running when you quit the desktop app or the SSH connection drops, so agents on that host finish their turns. The next connection reuses the same server. To stop it, remove the environment from **Settings** → **Connections**.
+
 SSH launch is a desktop feature because it needs local process and SSH access. Once the environment is paired and saved, it uses the same environment list and connection model as direct LAN, Tailscale, HTTPS, or future tunnel-backed environments.
 
 #### SSH Launch Troubleshooting

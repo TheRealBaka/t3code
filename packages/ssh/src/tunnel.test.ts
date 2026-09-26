@@ -99,6 +99,46 @@ function commandArgs(command: ChildProcess.Command): ReadonlyArray<string> {
   return command._tag === "StandardCommand" ? command.args : [];
 }
 
+function makeManagerHarness() {
+  const spawnedCommands: Array<ReadonlyArray<string>> = [];
+  const counts = { tunnelKills: 0, stopCommands: 0 };
+  const spawner = ChildProcessSpawner.make((command) =>
+    Effect.sync(() => {
+      const args = commandArgs(command);
+      spawnedCommands.push(args);
+      if (args.includes("-N")) {
+        return makeRunningProcess(() => {
+          counts.tunnelKills += 1;
+        });
+      }
+      if (args.includes("sh") && args.includes("--")) {
+        return makeSuccessfulProcess('{"remotePort":3773}\n');
+      }
+      if (args.includes("sh")) {
+        counts.stopCommands += 1;
+        return makeSuccessfulProcess('{"stopped":true}\n');
+      }
+      return makeSuccessfulProcess("\n");
+    }),
+  );
+  const layer = Layer.mergeAll(
+    NodeServices.layer,
+    Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    Layer.succeed(HttpClient.HttpClient, testHttpClient),
+    Layer.succeed(NetService.NetService, testNetService),
+    SshPasswordPrompt.disabledLayer,
+    SshEnvironmentManager.layer(),
+  );
+  return { spawnedCommands, counts, layer };
+}
+
+const devboxTarget = {
+  alias: "devbox",
+  hostname: "devbox.example.com",
+  username: "julius",
+  port: 2222,
+} as const;
+
 describe("ssh tunnel scripts", () => {
   it("builds the remote t3 runner with npx and npm fallbacks", () => {
     const script = buildRemoteT3RunnerScript({ nodeEngineRange: TEST_NODE_ENGINE_RANGE });
@@ -388,47 +428,12 @@ describe("ssh tunnel scripts", () => {
   });
 
   it.effect("closes the tunnel scope and starts fresh after disconnect", () => {
-    const spawnedCommands: Array<ReadonlyArray<string>> = [];
-    let tunnelKillCount = 0;
-    let stopCommandCount = 0;
-    const spawner = ChildProcessSpawner.make((command) =>
-      Effect.sync(() => {
-        const args = commandArgs(command);
-        spawnedCommands.push(args);
-        if (args.includes("-N")) {
-          return makeRunningProcess(() => {
-            tunnelKillCount += 1;
-          });
-        }
-        if (args.includes("sh") && args.includes("--")) {
-          return makeSuccessfulProcess('{"remotePort":3773}\n');
-        }
-        if (args.includes("sh")) {
-          stopCommandCount += 1;
-          return makeSuccessfulProcess('{"stopped":true}\n');
-        }
-        return makeSuccessfulProcess("\n");
-      }),
-    );
-    const layer = Layer.mergeAll(
-      NodeServices.layer,
-      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Layer.succeed(HttpClient.HttpClient, testHttpClient),
-      Layer.succeed(NetService.NetService, testNetService),
-      SshPasswordPrompt.disabledLayer,
-      SshEnvironmentManager.layer(),
-    );
-    const target = {
-      alias: "devbox",
-      hostname: "devbox.example.com",
-      username: "julius",
-      port: 2222,
-    } as const;
+    const { spawnedCommands, counts, layer } = makeManagerHarness();
 
     return Effect.gen(function* () {
       const manager = yield* SshEnvironmentManager;
 
-      const first = yield* manager.ensureEnvironment(target);
+      const first = yield* manager.ensureEnvironment(devboxTarget);
       assert.equal(first.httpBaseUrl, "http://127.0.0.1:41773/");
       const firstTunnelArgs = spawnedCommands.find((args) => args.includes("-N"));
       assert.isDefined(firstTunnelArgs);
@@ -436,14 +441,28 @@ describe("ssh tunnel scripts", () => {
       assert.include(firstTunnelArgs, "ControlPath=none");
       assert.include(firstTunnelArgs, "ControlPersist=no");
 
-      yield* manager.disconnectEnvironment(target);
-      assert.equal(tunnelKillCount, 1);
-      assert.equal(stopCommandCount, 1);
+      yield* manager.disconnectEnvironment(devboxTarget);
+      assert.equal(counts.tunnelKills, 1);
+      assert.equal(counts.stopCommands, 1);
 
-      yield* manager.ensureEnvironment(target);
+      yield* manager.ensureEnvironment(devboxTarget);
 
       assert.equal(spawnedCommands.filter((args) => args.includes("-N")).length, 2);
-      assert.equal(tunnelKillCount, 1);
+      assert.equal(counts.tunnelKills, 1);
     }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("leaves the remote server running when the app shuts down", () => {
+    const { counts, layer } = makeManagerHarness();
+
+    return Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const manager = yield* SshEnvironmentManager;
+        yield* manager.ensureEnvironment(devboxTarget);
+      }).pipe(Effect.provide(layer), Effect.scoped);
+
+      assert.equal(counts.tunnelKills, 1);
+      assert.equal(counts.stopCommands, 0);
+    });
   });
 });

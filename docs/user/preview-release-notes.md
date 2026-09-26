@@ -1,6 +1,6 @@
 ## T3 Code++
 
-Independent fork based on T3 Code 0.0.38, with Pi integration, math and video rendering, reply comments, Claude side chats, a finished-thread count on the app icon, and automatic updates.
+Independent fork based on T3 Code 0.0.38, with Pi integration, math and video rendering, reply comments, Claude side chats, a finished-thread count on the app icon, SSH servers that keep agents working after the app closes or the connection drops, and automatic updates.
 
 ### Install
 

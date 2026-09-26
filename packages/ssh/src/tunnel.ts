@@ -532,7 +532,8 @@ if [ -n "$DEFAULT_RUNTIME_INFO" ]; then
   DEFAULT_RUNTIME_PID="\${DEFAULT_RUNTIME_INFO%% *}"
   DEFAULT_REMOTE_PORT="\${DEFAULT_RUNTIME_INFO#* }"
 fi
-if [ -n "$DEFAULT_REMOTE_PORT" ]; then
+# A managed server also writes the default runtime file; only adopt a different server.
+if [ -n "$DEFAULT_REMOTE_PORT" ] && [ "$DEFAULT_RUNTIME_PID" != "$REMOTE_PID" ]; then
   REMOTE_PORT="$DEFAULT_REMOTE_PORT"
   if wait_ready "@@T3_REUSE_READY_TIMEOUT_MS@@"; then
     if [ "$REMOTE_MANAGED" = "managed" ]; then
@@ -1382,9 +1383,6 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ),
     );
     tunnels.set(input.key, tunnelEntry);
-    const spawnerService = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const fileSystemService = yield* FileSystem.FileSystem;
-    const pathService = yield* Path.Path;
     yield* Scope.addFinalizer(
       entryScope,
       Effect.gen(function* () {
@@ -1398,33 +1396,15 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
           remotePort: tunnelEntry.remotePort,
         });
         tunnels.delete(tunnelEntry.key);
-        const authSecret = authSecrets.get(tunnelEntry.key) ?? null;
-        yield* Effect.all(
-          [
-            tunnelEntry.process.kill({
-              killSignal: "SIGTERM",
-              forceKillAfter: TUNNEL_SHUTDOWN_TIMEOUT_MS,
-            }),
-            stopRemoteServer(
-              tunnelEntry.target,
-              authSecret === null
-                ? {
-                    batchMode: "yes",
-                    interactiveAuth: false,
-                  }
-                : {
-                    authSecret,
-                    batchMode: "no",
-                    interactiveAuth: true,
-                  },
-            ).pipe(
-              Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawnerService),
-              Effect.provideService(FileSystem.FileSystem, fileSystemService),
-              Effect.provideService(Path.Path, pathService),
-            ),
-          ],
-          { concurrency: "unbounded" },
-        ).pipe(Effect.ignore);
+        // Only the local tunnel goes away. The remote server keeps running so agent turns
+        // survive app quits and dropped connections; removing the environment stops it through
+        // disconnectEnvironment.
+        yield* tunnelEntry.process
+          .kill({
+            killSignal: "SIGTERM",
+            forceKillAfter: TUNNEL_SHUTDOWN_TIMEOUT_MS,
+          })
+          .pipe(Effect.ignore);
         yield* Effect.logDebug("ssh.environment.tunnel.finalizer.succeeded", {
           ...sshTargetLogFields(tunnelEntry.target),
           key: tunnelEntry.key,
@@ -1600,13 +1580,11 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       yield* closeTunnelEntry(entry);
     }
     yield* cancelPendingTunnelEntry(key, resolvedTarget);
-    if (entry === null) {
-      yield* runWithSshAuth({
-        key,
-        target: resolvedTarget,
-        operation: (authOptions) => stopRemoteServer(resolvedTarget, authOptions),
-      });
-    }
+    yield* runWithSshAuth({
+      key,
+      target: resolvedTarget,
+      operation: (authOptions) => stopRemoteServer(resolvedTarget, authOptions),
+    });
     yield* Effect.logInfo("ssh.environment.disconnect.succeeded", {
       ...sshTargetLogFields(resolvedTarget),
       key,
