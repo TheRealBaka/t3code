@@ -29,7 +29,7 @@ import { cn } from "~/lib/utils";
 import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { quoteTextFromRange } from "~/selectionQuote";
-import { useSideChatSelectionStore } from "~/sideChatSelectionStore";
+import { selectSideChatComments, useSideChatSelectionStore } from "~/sideChatSelectionStore";
 
 const EMPTY_COMMENTS: ReadonlyArray<ReviewCommentContext> = [];
 let replyCommentSequence = 0;
@@ -215,7 +215,8 @@ function subscribeToSelectionChanges(listener: () => void): () => void {
  * Lets the user highlight part of an assistant reply, attach a comment to the
  * composer or send the quote to the side chat, and see numbered bubbles beside
  * the reply for pending comments. Comments live in the composer draft as review
- * comments; nothing new crosses the wire.
+ * comments, or in the side chat's pending context for side chat answers;
+ * nothing new crosses the wire.
  */
 export function AssistantReplyComments(props: {
   readonly messageId: string;
@@ -225,12 +226,24 @@ export function AssistantReplyComments(props: {
   readonly origin?: "reply" | "side-chat";
 }) {
   const { containerRef, messageId, threadRef } = props;
-  const comments =
+  // Comments on a side chat answer go with the next side question, not the next main message.
+  const sideChat = props.origin === "side-chat";
+  const draftComments =
     useComposerDraftStore((store) => store.getComposerDraft(threadRef)?.reviewComments) ??
     EMPTY_COMMENTS;
-  const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
-  const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
-  const setReviewComments = useComposerDraftStore((store) => store.setReviewComments);
+  const sideChatComments = useSideChatSelectionStore((store) =>
+    selectSideChatComments(store, threadRef),
+  );
+  const comments = sideChat ? sideChatComments : draftComments;
+  const addDraftComment = useComposerDraftStore((store) => store.addReviewComment);
+  const removeDraftComment = useComposerDraftStore((store) => store.removeReviewComment);
+  const setDraftComments = useComposerDraftStore((store) => store.setReviewComments);
+  const addSideChatComment = useSideChatSelectionStore((store) => store.addComment);
+  const removeSideChatComment = useSideChatSelectionStore((store) => store.removeComment);
+  const setSideChatComments = useSideChatSelectionStore((store) => store.setComments);
+  const addReviewComment = sideChat ? addSideChatComment : addDraftComment;
+  const removeReviewComment = sideChat ? removeSideChatComment : removeDraftComment;
+  const setReviewComments = sideChat ? setSideChatComments : setDraftComments;
   const ownComments = comments.filter(
     (comment) => chatReplyCommentMessageId(comment) === messageId,
   );

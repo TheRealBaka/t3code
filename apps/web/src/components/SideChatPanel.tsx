@@ -106,8 +106,10 @@ import { resolveComposerMenuActiveItemId } from "~/components/chat/composerMenuH
 import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
 import { shouldRenderTraitsControls, TraitsPicker } from "~/components/chat/TraitsPicker";
 import type { ContextWindowSnapshot } from "~/lib/contextWindow";
+import type { ReviewCommentContext } from "~/reviewCommentContext";
 import {
   formatSideChatSelectionsForPrompt,
+  selectSideChatComments,
   selectSideChatSelections,
   useSideChatSelectionStore,
   type SideChatSelection,
@@ -119,6 +121,51 @@ import {
   useSideChatStore,
   type SideChatExchange,
 } from "~/sideChatStore";
+import { useRightPanelStore } from "~/rightPanelStore";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+
+/**
+ * Ends a thread's side chat: the server forgets it, and its transcript,
+ * selections, and comments go, so the next question starts a new one.
+ */
+function useEndSideChat(): (threadRef: ScopedThreadRef) => void {
+  const runClose = useAtomCommand(closeSideChat, { reportFailure: false, reportDefect: false });
+  return useCallback(
+    (threadRef: ScopedThreadRef) => {
+      const { sideChatId } = selectSideChatThreadState(
+        useSideChatStore.getState().byThreadKey,
+        threadRef,
+      );
+      if (sideChatId.length > 0) {
+        void runClose({ environmentId: threadRef.environmentId, sideChatId });
+      }
+      useSideChatSelectionStore.getState().clear(threadRef);
+      useSideChatStore.getState().reset(threadRef);
+    },
+    [runClose],
+  );
+}
+
+/**
+ * Closing the side chat tab ends the side chat, so opening it again starts
+ * fresh instead of bringing back the old transcript. Mounted by the chat view,
+ * which outlives the panel.
+ */
+export function useEndSideChatWhenTabCloses(threadRef: ScopedThreadRef | null): void {
+  const endSideChat = useEndSideChat();
+  useEffect(() => {
+    if (!threadRef) return;
+    const threadKey = scopedThreadKey(threadRef);
+    const hasSideChatTab = (state: ReturnType<typeof useRightPanelStore.getState>) =>
+      state.byThreadKey[threadKey]?.surfaces.some((surface) => surface.kind === "side-chat") ??
+      false;
+    return useRightPanelStore.subscribe((state, previous) => {
+      if (hasSideChatTab(previous) && !hasSideChatTab(state)) {
+        endSideChat(threadRef);
+      }
+    });
+  }, [endSideChat, threadRef]);
+}
 
 /** How close to the bottom the reader must be for a new answer to follow itself down. */
 const FOLLOW_TAIL_SLACK_PX = 96;
@@ -243,11 +290,14 @@ function previewSideChatQuote(quote: string): string {
 function buildSideChatQuestion(
   typed: string,
   selections: ReadonlyArray<SideChatSelection>,
+  comments: ReadonlyArray<ReviewCommentContext>,
   hasImages: boolean,
 ): string {
-  const quoted = formatSideChatSelectionsForPrompt(selections);
+  const quoted = formatSideChatSelectionsForPrompt(selections, comments);
   if (quoted.length > 0) {
-    return [quoted, typed.length > 0 ? typed : "Explain the selected text."].join("\n\n");
+    const fallback =
+      selections.length > 0 ? "Explain the selected text." : "Address the comments above.";
+    return [quoted, typed.length > 0 ? typed : fallback].join("\n\n");
   }
   if (typed.length > 0) return typed;
   return hasImages ? "Describe the attached image." : "";
@@ -339,7 +389,7 @@ export function SideChatPanel({
     selectSideChatThreadState(state.byThreadKey, threadRef),
   );
   const runAsk = useAtomCommand(askSideChat, { reportFailure: false });
-  const runClose = useAtomCommand(closeSideChat, { reportFailure: false, reportDefect: false });
+  const endSideChat = useEndSideChat();
   const [prompt, setPrompt] = useState("");
   const [cursor, setCursor] = useState(0);
   const [trigger, setTrigger] = useState<ComposerTrigger | null>(null);
@@ -362,6 +412,7 @@ export function SideChatPanel({
   const selections = useSideChatSelectionStore((state) =>
     selectSideChatSelections(state, threadRef),
   );
+  const comments = useSideChatSelectionStore((state) => selectSideChatComments(state, threadRef));
 
   /**
    * The fork's own context window, shaped like the main composer's snapshot so
@@ -501,9 +552,7 @@ export function SideChatPanel({
         const uploaded = getUploadedAttachments({
           environmentId: threadRef.environmentId,
           images: [...staged],
-        })?.filter(
-          (attachment): attachment is ChatImageAttachment => attachment.type === "image",
-        );
+        })?.filter((attachment): attachment is ChatImageAttachment => attachment.type === "image");
         if (!uploaded || uploaded.length !== staged.length) {
           useSideChatStore.getState().failExchange(threadRef, exchangeId, {
             error: "Retry or remove failed uploads before sending.",
@@ -626,23 +675,15 @@ export function SideChatPanel({
     viewport.scrollTop = viewport.scrollHeight;
   }, [exchanges.length, tailLength]);
 
-  // Clearing drops the fork on the server too, then forks again on the next
-  // question: the point is a transcript the reader can start over from.
+  // `/clear` ends the side chat in place: the point is a transcript the reader
+  // can start over from.
   const clear = useCallback(() => {
     stopRef.current?.();
     stopRef.current = null;
-    const { sideChatId } = selectSideChatThreadState(
-      useSideChatStore.getState().byThreadKey,
-      threadRef,
-    );
-    if (sideChatId.length > 0) {
-      void runClose({ environmentId: threadRef.environmentId, sideChatId });
-    }
     releaseStagedImages(imagesRef.current);
     setImages([]);
-    useSideChatSelectionStore.getState().clear(threadRef);
-    useSideChatStore.getState().reset(threadRef);
-  }, [runClose, threadRef]);
+    endSideChat(threadRef);
+  }, [endSideChat, threadRef]);
 
   // ------------------------------------------------------------------
   // Image attachments
@@ -660,7 +701,10 @@ export function SideChatPanel({
       const staged: ComposerImageAttachment[] = [];
       for (const file of candidates) {
         // Oversized images are downscaled to fit rather than refused.
-        const compressed = await prepareImageForAttachment(file, PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
+        const compressed = await prepareImageForAttachment(
+          file,
+          PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+        );
         if (!compressed.ok) continue;
         const attachmentFile = compressed.file;
         staged.push({
@@ -721,13 +765,11 @@ export function SideChatPanel({
   const submit = useCallback(() => {
     if (streaming) return;
     const staged = imagesRef.current;
-    const currentSelections = selectSideChatSelections(
-      useSideChatSelectionStore.getState(),
-      threadRef,
-    );
+    const selectionState = useSideChatSelectionStore.getState();
     const question = buildSideChatQuestion(
       promptRef.current.trim(),
-      currentSelections,
+      selectSideChatSelections(selectionState, threadRef),
+      selectSideChatComments(selectionState, threadRef),
       staged.length > 0,
     );
     if (question.length === 0) return;
@@ -868,9 +910,7 @@ export function SideChatPanel({
   const nudgeMenuHighlight = useCallback((key: "ArrowDown" | "ArrowUp") => {
     const items = menuItemsRef.current;
     if (items.length === 0) return;
-    const highlightedIndex = items.findIndex(
-      (item) => item.id === highlightedItemIdRef.current,
-    );
+    const highlightedIndex = items.findIndex((item) => item.id === highlightedItemIdRef.current);
     const normalizedIndex = highlightedIndex >= 0 ? highlightedIndex : key === "ArrowDown" ? -1 : 0;
     const offset = key === "ArrowDown" ? 1 : -1;
     const nextIndex = (normalizedIndex + offset + items.length) % items.length;
@@ -939,7 +979,7 @@ export function SideChatPanel({
   );
 
   const hasSendableContent =
-    prompt.trim().length > 0 || selections.length > 0 || images.length > 0;
+    prompt.trim().length > 0 || selections.length > 0 || comments.length > 0 || images.length > 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -992,7 +1032,7 @@ export function SideChatPanel({
             >
               <ComposerSurface.Main>
                 <div className="rounded-[20px]">
-                  {selections.length > 0 || images.length > 0 ? (
+                  {selections.length > 0 || comments.length > 0 || images.length > 0 ? (
                     <div className="flex flex-wrap items-center gap-1 px-3 pt-3 text-[12px]">
                       {selections.map((selection, index) => (
                         <Tooltip key={selection.id}>
@@ -1016,6 +1056,36 @@ export function SideChatPanel({
                           <TooltipPopup side="top" className="max-w-72">
                             <ChatMarkdown
                               text={previewSideChatQuote(selection.quote)}
+                              cwd={cwd}
+                              threadRef={threadRef}
+                            />
+                          </TooltipPopup>
+                        </Tooltip>
+                      ))}
+                      {comments.map((comment) => (
+                        <Tooltip key={comment.id}>
+                          <TooltipTrigger
+                            render={<span className={COMPOSER_INLINE_CHIP_CLASS_NAME} />}
+                          >
+                            <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>
+                              {comment.rangeLabel}
+                            </span>
+                            <button
+                              type="button"
+                              aria-label={`Remove ${comment.rangeLabel}`}
+                              className={COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME}
+                              onClick={() =>
+                                useSideChatSelectionStore
+                                  .getState()
+                                  .removeComment(threadRef, comment.id)
+                              }
+                            >
+                              <XIcon aria-hidden className="size-[0.86em]" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipPopup side="top" className="max-w-72">
+                            <ChatMarkdown
+                              text={`${previewSideChatQuote(comment.diff)}\n\n${comment.text}`}
                               cwd={cwd}
                               threadRef={threadRef}
                             />
@@ -1176,7 +1246,9 @@ export function SideChatPanel({
                 ) : (
                   <FolderIcon aria-hidden className="size-3 shrink-0" />
                 )}
-                <span className="min-w-0 truncate">{resolveLockedWorkspaceLabel(worktreePath)}</span>
+                <span className="min-w-0 truncate">
+                  {resolveLockedWorkspaceLabel(worktreePath)}
+                </span>
               </span>
               {branch ? (
                 <span

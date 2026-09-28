@@ -5,8 +5,9 @@
  * question *about* the conversation they are looking at, and the answer comes
  * from a fork of the provider session so the main thread's context is never
  * touched. Forks have no tool access — they answer from what is already in
- * context — and follow-up questions resume the fork, so a side chat keeps its
- * own memory of earlier side exchanges.
+ * context. Every question forks the thread as it is at that moment, so a side
+ * chat keeps up with a main thread that has moved on; its own earlier
+ * exchanges ride along in the prompt (see `buildSideChatPrompt`).
  *
  * Nothing here is persisted. Entries live in this service's map for the life
  * of the server process and are dropped when the client closes them or after
@@ -117,6 +118,9 @@ const SIDE_CHAT_PREAMBLE = [
   "Keep the answer short and direct.",
 ].join(" ");
 
+/** How much of a side chat's earlier exchanges each new question carries. */
+const SIDE_CHAT_HISTORY_MAX_CHARS = 24_000;
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const PROVIDER_LABELS: Readonly<Record<string, string>> = {
@@ -127,7 +131,7 @@ const PROVIDER_LABELS: Readonly<Record<string, string>> = {
   piAgent: "Pi",
 };
 
-interface SideChatExchange {
+export interface SideChatExchange {
   readonly prompt: string;
   readonly answer: string;
 }
@@ -147,14 +151,15 @@ interface SideChatThreadContext {
 
 interface SideChatEntry {
   readonly threadId: ThreadId;
-  readonly provider: ProviderDriverKind;
-  /** Claude session id of the thread this side chat was forked from. */
-  readonly parentSessionId: string;
-  /** Claude session id of the fork, known once the SDK reports it. */
-  forkSessionId: string | undefined;
   readonly createdAt: number;
   lastUsedAt: number;
   readonly exchanges: Array<SideChatExchange>;
+}
+
+/** The thread's Claude session as of this ask; each ask forks it afresh. */
+interface SideChatParent {
+  readonly provider: ProviderDriverKind;
+  readonly sessionId: string;
 }
 
 export class SideChatCoordinator extends Context.Service<
@@ -199,22 +204,39 @@ function readClaudeParentSessionId(resumeCursor: unknown): string | undefined {
 }
 
 /**
- * The SDK stamps hook messages with a transient session id; every other
- * message carries the durable one. Mirrors the Claude adapter's rule.
+ * The text sent for one side question. Every ask forks the thread as it is
+ * now, so the fork has none of the side chat's earlier exchanges; the newest
+ * of them ride along as a quoted transcript, capped at
+ * `SIDE_CHAT_HISTORY_MAX_CHARS`.
  */
-function readDurableSessionId(message: SDKMessage): string | undefined {
-  if (typeof message.session_id !== "string" || message.session_id.length === 0) {
-    return undefined;
+export function buildSideChatPrompt(
+  exchanges: ReadonlyArray<SideChatExchange>,
+  question: string,
+): string {
+  const kept: Array<string> = [];
+  let used = 0;
+  for (let index = exchanges.length - 1; index >= 0; index -= 1) {
+    const exchange = exchanges[index]!;
+    const block = `Question: ${exchange.prompt}\nAnswer: ${exchange.answer}`;
+    if (used + block.length > SIDE_CHAT_HISTORY_MAX_CHARS) {
+      if (kept.length === 0) {
+        kept.push(`${block.slice(0, SIDE_CHAT_HISTORY_MAX_CHARS)}…`);
+      }
+      break;
+    }
+    kept.push(block);
+    used += block.length;
   }
-  if (
-    message.type === "system" &&
-    (message.subtype === "hook_started" ||
-      message.subtype === "hook_progress" ||
-      message.subtype === "hook_response")
-  ) {
-    return undefined;
+  if (kept.length === 0) {
+    return `${SIDE_CHAT_PREAMBLE}\n\n${question}`;
   }
-  return message.session_id;
+  const omitted = exchanges.length - kept.length;
+  const history = [
+    "Earlier in this side chat (the conversation above is newer than some of these answers):",
+    ...(omitted > 0 ? [`(${omitted} older side exchanges left out)`] : []),
+    ...kept.toReversed(),
+  ].join("\n\n");
+  return `${SIDE_CHAT_PREAMBLE}\n\n${history}\n\nNew side question:\n${question}`;
 }
 
 function isSubagentMessage(message: SDKMessage): boolean {
@@ -474,10 +496,7 @@ export const make = Effect.gen(function* () {
     return { claudeEnvironment, executablePath, catalog };
   });
 
-  /**
-   * Register (or look up) the side chat and resolve everything the fork needs.
-   * Fails with `unsupportedProvider` for any provider that cannot fork.
-   */
+  /** Look up the side chat, registering it on its first question. */
   const resolveEntry = Effect.fn("SideChatCoordinator.resolveEntry")(function* (
     input: SideChatAskInput,
     now: number,
@@ -491,8 +510,25 @@ export const make = Effect.gen(function* () {
       }
       return existing;
     }
+    const entry: SideChatEntry = {
+      threadId: input.threadId,
+      createdAt: now,
+      lastUsedAt: now,
+      exchanges: [],
+    };
+    entries.set(input.sideChatId, entry);
+    return entry;
+  });
 
-    const binding = yield* sessionDirectory.getBinding(input.threadId).pipe(
+  /**
+   * The thread's current Claude session, read on every ask so the fork starts
+   * from where the thread is now. Fails with `unsupportedProvider` for any
+   * provider that cannot fork.
+   */
+  const resolveParent = Effect.fn("SideChatCoordinator.resolveParent")(function* (
+    threadId: ThreadId,
+  ): Effect.fn.Return<SideChatParent, SideChatError> {
+    const binding = yield* sessionDirectory.getBinding(threadId).pipe(
       Effect.mapError(
         (cause) =>
           new SideChatError({
@@ -510,24 +546,13 @@ export const make = Effect.gen(function* () {
       return yield* unsupportedProvider(session.provider);
     }
 
-    const parentSessionId = readClaudeParentSessionId(session.resumeCursor);
-    if (!parentSessionId) {
+    const sessionId = readClaudeParentSessionId(session.resumeCursor);
+    if (!sessionId) {
       return yield* new SideChatError({
         detail: "This thread has no resumable Claude session to fork yet. Send a message first.",
       });
     }
-
-    const entry: SideChatEntry = {
-      threadId: input.threadId,
-      provider: session.provider,
-      parentSessionId,
-      forkSessionId: undefined,
-      createdAt: now,
-      lastUsedAt: now,
-      exchanges: [],
-    };
-    entries.set(input.sideChatId, entry);
-    return entry;
+    return { provider: session.provider, sessionId };
   });
 
   /**
@@ -556,19 +581,21 @@ export const make = Effect.gen(function* () {
           detail: `Invalid attachment id '${attachment.id}'.`,
         });
       }
-      const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
-        Effect.mapError(
-          () =>
-            new SideChatError({ detail: `Failed to read the attachment '${attachment.name}'.` }),
-        ),
-      );
+      const bytes = yield* fileSystem
+        .readFile(attachmentPath)
+        .pipe(
+          Effect.mapError(
+            () =>
+              new SideChatError({ detail: `Failed to read the attachment '${attachment.name}'.` }),
+          ),
+        );
       images.push({ mimeType: attachment.mimeType, bytes });
     }
     return images;
   });
 
   const buildQueryOptions = (params: {
-    readonly entry: SideChatEntry;
+    readonly parentSessionId: string;
     readonly cwd: string | undefined;
     readonly modelSelection: ModelSelection;
     readonly instance: ClaudeInstanceContext;
@@ -589,10 +616,6 @@ export const make = Effect.gen(function* () {
       ),
       resolvedSelection.model,
     );
-    // First ask forks the parent session; later asks resume the fork so the
-    // side chat keeps its own memory without ever writing to the thread.
-    const resume = params.entry.forkSessionId ?? params.entry.parentSessionId;
-
     return {
       ...(params.cwd ? { cwd: params.cwd } : {}),
       ...(apiModelId ? { model: apiModelId } : {}),
@@ -604,8 +627,9 @@ export const make = Effect.gen(function* () {
         append: T3_MEDIA_RENDERING_INSTRUCTIONS,
       },
       settingSources: [...SIDE_CHAT_SETTING_SOURCES],
-      resume,
-      ...(params.entry.forkSessionId === undefined ? { forkSession: true } : {}),
+      // Forking never writes to the thread's own session.
+      resume: params.parentSessionId,
+      forkSession: true,
       // A side chat answers from context: no tools, no MCP servers, and none
       // of the user's hooks (which belong to real turns, not to questions).
       allowedTools: [...SIDE_CHAT_ALLOWED_TOOLS],
@@ -629,6 +653,7 @@ export const make = Effect.gen(function* () {
   const runClaudeAsk = Effect.fn("SideChatCoordinator.runClaudeAsk")(function* (
     input: SideChatAskInput,
     entry: SideChatEntry,
+    parent: SideChatParent,
     queue: SideChatEventQueue,
   ): Effect.fn.Return<void, SideChatError> {
     const threadContext = yield* resolveThreadContext(entry.threadId);
@@ -638,15 +663,14 @@ export const make = Effect.gen(function* () {
 
     const abortController = new AbortController();
     const options = buildQueryOptions({
-      entry,
+      parentSessionId: parent.sessionId,
       cwd: threadContext.cwd,
       modelSelection,
       instance,
       abortController,
     });
     const images = yield* readSideChatImages(input.attachments);
-    const promptText =
-      entry.exchanges.length === 0 ? `${SIDE_CHAT_PREAMBLE}\n\n${input.prompt}` : input.prompt;
+    const promptText = buildSideChatPrompt(entry.exchanges, input.prompt);
     // A text-only question stays on the plain string prompt; images have to go
     // in as streaming input, which the one-message iterable closes right after.
     const prompt =
@@ -677,13 +701,6 @@ export const make = Effect.gen(function* () {
         }),
     ).pipe(
       Stream.runForEach((message) => {
-        const sessionId = readDurableSessionId(message);
-        if (sessionId !== undefined && sessionId !== entry.parentSessionId) {
-          // The fork announces itself with a fresh session id on its init
-          // message; that id is what later asks resume.
-          entry.forkSessionId = sessionId;
-        }
-
         assistantText = readAssistantText(message) ?? assistantText;
         resultText = readResultText(message) ?? resultText;
         resultError = readResultError(message) ?? resultError;
@@ -742,16 +759,17 @@ export const make = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
     sweepExpired(now);
 
+    const parent = yield* resolveParent(input.threadId);
     const entry = yield* resolveEntry(input, now);
     entry.lastUsedAt = now;
 
     yield* Queue.offer(queue, {
       type: "started",
       sideChatId: input.sideChatId,
-      provider: entry.provider,
+      provider: parent.provider,
     }).pipe(Effect.asVoid);
 
-    yield* runClaudeAsk(input, entry, queue);
+    yield* runClaudeAsk(input, entry, parent, queue);
   });
 
   const ask: SideChatCoordinator["Service"]["ask"] = (input) =>

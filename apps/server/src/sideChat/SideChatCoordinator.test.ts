@@ -6,7 +6,6 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -23,18 +22,12 @@ import * as SideChatCoordinator from "./SideChatCoordinator.ts";
 const THREAD_ID = ThreadId.make("thread-side-chat");
 const CLAUDE_SESSION_ID = "550e8400-e29b-41d4-a716-446655440000";
 
-/**
- * Counts `getBinding` calls so a test can tell "this ask reused the open side
- * chat" from "this ask resolved the thread's provider session again".
- */
+/** Counts `getBinding` calls, one per read of the thread's current provider session. */
 interface BindingProbe {
   calls: number;
 }
 
-const makeTestLayer = (input: {
-  readonly provider: string;
-  readonly probe: BindingProbe;
-}) => {
+const makeTestLayer = (input: { readonly provider: string; readonly probe: BindingProbe }) => {
   const binding: ProviderSessionDirectory.ProviderRuntimeBinding = {
     threadId: THREAD_ID,
     provider: ProviderDriverKind.make(input.provider),
@@ -75,9 +68,7 @@ const makeTestLayer = (input: {
 
 const ask = (coordinator: SideChatCoordinator.SideChatCoordinator["Service"], prompt: string) =>
   Effect.flip(
-    Stream.runCollect(
-      coordinator.ask({ threadId: THREAD_ID, sideChatId: "side-chat-1", prompt }),
-    ),
+    Stream.runCollect(coordinator.ask({ threadId: THREAD_ID, sideChatId: "side-chat-1", prompt })),
   );
 
 describe("SideChatCoordinator", () => {
@@ -93,36 +84,54 @@ describe("SideChatCoordinator", () => {
     }).pipe(Effect.provide(makeTestLayer({ provider: "codex", probe })));
   });
 
-  it.effect("reuses an open side chat until it has idled out", () => {
+  it.effect("forks the thread's current session on every question", () => {
     const probe: BindingProbe = { calls: 0 };
     return Effect.gen(function* () {
       const coordinator = yield* SideChatCoordinator.SideChatCoordinator;
 
       yield* ask(coordinator, "first question");
-      expect(probe.calls).toBe(1);
-
-      // Follow-ups answer from the side chat that is already open.
-      yield* ask(coordinator, "second question");
-      expect(probe.calls).toBe(1);
-
-      yield* TestClock.adjust(Duration.minutes(31));
-      yield* ask(coordinator, "much later question");
+      yield* ask(coordinator, "follow-up after the thread moved on");
       expect(probe.calls).toBe(2);
     }).pipe(Effect.provide(makeTestLayer({ provider: "claudeAgent", probe })));
   });
+});
 
-  it.effect("closing a side chat forgets it", () => {
-    const probe: BindingProbe = { calls: 0 };
-    return Effect.gen(function* () {
-      const coordinator = yield* SideChatCoordinator.SideChatCoordinator;
+describe("buildSideChatPrompt", () => {
+  it("sends the first question with the side chat instructions only", () => {
+    const prompt = SideChatCoordinator.buildSideChatPrompt([], "what changed?");
+    expect(prompt).toMatch(/^You are answering a side question/);
+    expect(prompt.endsWith("\n\nwhat changed?")).toBe(true);
+    expect(prompt).not.toContain("Earlier in this side chat");
+  });
 
-      yield* ask(coordinator, "first question");
-      expect(probe.calls).toBe(1);
+  it("carries earlier side exchanges ahead of the new question, oldest first", () => {
+    const prompt = SideChatCoordinator.buildSideChatPrompt(
+      [
+        { prompt: "first", answer: "one" },
+        { prompt: "second", answer: "two" },
+      ],
+      "third?",
+    );
+    const first = prompt.indexOf("Question: first\nAnswer: one");
+    const second = prompt.indexOf("Question: second\nAnswer: two");
+    expect(first).toBeGreaterThan(0);
+    expect(second).toBeGreaterThan(first);
+    expect(prompt.endsWith("New side question:\nthird?")).toBe(true);
+  });
 
-      yield* coordinator.close({ sideChatId: "side-chat-1" });
-
-      yield* ask(coordinator, "asked again after closing");
-      expect(probe.calls).toBe(2);
-    }).pipe(Effect.provide(makeTestLayer({ provider: "claudeAgent", probe })));
+  it("drops the oldest exchanges once the carried history is too long", () => {
+    const long = "x".repeat(15_000);
+    const prompt = SideChatCoordinator.buildSideChatPrompt(
+      [
+        { prompt: "oldest", answer: long },
+        { prompt: "middle", answer: long },
+        { prompt: "newest", answer: "short" },
+      ],
+      "next?",
+    );
+    expect(prompt).not.toContain("Question: oldest");
+    expect(prompt).toContain("Question: middle");
+    expect(prompt).toContain("Question: newest");
+    expect(prompt).toContain("(1 older side exchanges left out)");
   });
 });

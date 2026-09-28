@@ -107,7 +107,7 @@ Automatic SSH installation of the fork is not included yet. The inherited SSH la
 ## Known limitations
 
 - **Limited interactive verification:** a successful automated build is not a full installation or real-provider test on every platform. Report installation problems with your operating system version and the release number.
-- Side chats are currently **Claude-only** and ephemeral. They can disappear after closing, server restarts, or idle expiry; do not use them as durable notes.
+- Side chats are currently **Claude-only** and ephemeral. Each side question sees the main chat as it is at that moment. Closing the side chat tab or typing `/clear` starts a new one, and server restarts or idle expiry also end it; do not use them as durable notes. Comments on side chat answers are sent with your next side question, not the main chat.
 - Pi supports **Full Access** only. Use another provider for generated commit messages and thread titles.
 - Claude subscription usage currently reads file-based credentials, not macOS Keychain. Its usage dialog can report unavailable even when Claude conversations work. Do not export your credentials to work around this.
 - Some workspace video formats depend on the codecs supported by Electron.
