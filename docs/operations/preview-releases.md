@@ -40,6 +40,8 @@ Explicit `T3CODE_HOME` remains an advanced override. Never test against a live o
 
 Building an installer does not prove interactive behavior. Have a tester install the exact release on each platform, approve the unsigned download, configure a provider, send a turn, exercise the intended chat features, and confirm the official app still opens with its own data. Browser/computer-use verification requires the maintainer's permission.
 
+Each release page opens with a "What's new" section built from the commit titles since the previous `preview-*` tag: `feat` titles under New, `fix` under Fixed, `perf` under Faster. Other types, and fixes scoped to `ci`, `build`, or `release`, are left out. Write those titles for the people using the app, since they are published as written. The standing text below it is `docs/user/preview-release-notes.md`.
+
 The release notes deliberately document macOS Keychain usage-limit support and fork-aware SSH provisioning as limitations. Do not advertise them as verified. Intel macOS, Windows on ARM, and upstream migration are separate follow-up work.
 
 For a bad release, publish a fixed release as soon as possible: installed apps pick up whatever `/releases/latest` points at. Deleting the bad release makes the previous one latest again, but apps that already updated do not downgrade. Do not recommend downgrading against data already migrated by a newer release without a backup.

@@ -321,6 +321,11 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: true
+          # Full history and tags, without file contents, so the notes can list
+          # every change since the previous release.
+          fetch-depth: 0
+          fetch-tags: true
+          filter: blob:none
           sparse-checkout: |
             docs/user/preview-release-notes.md
           sparse-checkout-cone-mode: false
@@ -336,6 +341,47 @@ jobs:
           cat SHA256SUMS-*.txt > SHA256SUMS.txt
           rm SHA256SUMS-*.txt
           ls -la
+      - name: Write release notes
+        env:
+          VERSION: ${{ needs.checks.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Every change since the previous release, taken from the commit
+          # titles: feat is New, fix is Fixed, perf is Faster. Build, CI, test,
+          # and docs commits, and fixes scoped to ci/build/release, are left
+          # out; their titles are not news to someone using the app.
+          previous="$(git describe --tags --abbrev=0 --match 'preview-*' "${GITHUB_SHA}^" 2>/dev/null || true)"
+          range="${previous:+${previous}..}${GITHUB_SHA}"
+          changes() {
+            git log --no-merges --reverse --format='%s' "$range" \
+              | { grep -vE '^[a-z]+\((ci|build|release)\)!?:' || true; } \
+              | sed -nE "s/^$1(\([^)]*\))?!?: +(.+)$/\2/p" \
+              | awk '{ print "- " toupper(substr($0, 1, 1)) substr($0, 2) }'
+          }
+          new="$(changes feat)"
+          fixed="$(changes fix)"
+          faster="$(changes perf)"
+          {
+            echo "## What's new in ${VERSION}"
+            echo
+            if [ -z "${new}${fixed}${faster}" ]; then
+              echo "Build and packaging changes only; nothing you would notice in the app."
+              echo
+            fi
+            if [ -n "$new" ]; then printf '### New\n\n%s\n\n' "$new"; fi
+            if [ -n "$fixed" ]; then printf '### Fixed\n\n%s\n\n' "$fixed"; fi
+            if [ -n "$faster" ]; then printf '### Faster\n\n%s\n\n' "$faster"; fi
+            if [ -n "$previous" ]; then
+              echo "Changes since ${previous#preview-} ([full comparison](https://github.com/${REPO}/compare/${previous}...preview-${VERSION}))."
+              echo
+            fi
+            echo "---"
+            echo
+            cat docs/user/preview-release-notes.md
+          } > release-notes.md
+          cat release-notes.md
+
       - name: Publish GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -346,10 +392,11 @@ jobs:
           tag="preview-${VERSION}"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" downloads/* --clobber
+            gh release edit "$tag" --notes-file release-notes.md
           else
             gh release create "$tag" downloads/* \
               --target "$GITHUB_SHA" \
               --title "T3 Code++ ${VERSION}" \
-              --notes-file docs/user/preview-release-notes.md \
+              --notes-file release-notes.md \
               --latest
           fi
