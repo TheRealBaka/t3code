@@ -334,12 +334,15 @@ export function buildCodexInitializeParams(): CodexSchema.V1InitializeParams {
   };
 }
 
-const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
+/**
+ * Starts a short-lived `codex app-server` for one-off questions and completes
+ * the initialize handshake. The process lives as long as the caller's scope.
+ */
+const startCodexAppServerClient = Effect.fn("startCodexAppServerClient")(function* (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
   readonly launchArgs?: string;
   readonly cwd: string;
-  readonly customModels?: ReadonlyArray<string>;
   readonly environment?: NodeJS.ProcessEnv;
 }) {
   // `~` is not shell-expanded when env vars are set via `child_process.spawn`,
@@ -395,9 +398,21 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     },
   });
   yield* client.notify("initialized", undefined);
+  return { client, userAgent: initialize.userAgent };
+});
+
+const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(function* (input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly launchArgs?: string;
+  readonly cwd: string;
+  readonly customModels?: ReadonlyArray<string>;
+  readonly environment?: NodeJS.ProcessEnv;
+}) {
+  const { client, userAgent } = yield* startCodexAppServerClient(input);
 
   // Extract the version string after the first '/' in userAgent, up to the next space or the end
-  const versionMatch = initialize.userAgent.match(/\/([^\s]+)/);
+  const versionMatch = userAgent.match(/\/([^\s]+)/);
   const version = versionMatch ? versionMatch[1] : undefined;
 
   const accountResponse = yield* client.request("account/read", {});
@@ -428,6 +443,44 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     ),
     skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
   } satisfies CodexAppServerProviderSnapshot;
+});
+
+export type CodexAccountRateLimits =
+  | { readonly _tag: "NotSignedIn" }
+  | { readonly _tag: "NoSubscription"; readonly accountType: "apiKey" | "amazonBedrock" }
+  | {
+      readonly _tag: "Subscription";
+      readonly response: CodexSchema.V2GetAccountRateLimitsResponse;
+    };
+
+/**
+ * The signed-in Codex account's plan limits, for the `/usage` card. Only a
+ * ChatGPT sign-in has plan limits; API key and Bedrock accounts are billed per
+ * token instead. Needs a scope, which owns the short-lived app server.
+ */
+export const readCodexAccountRateLimits = Effect.fn("readCodexAccountRateLimits")(function* (
+  codexSettings: CodexSettings,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  const { client } = yield* startCodexAppServerClient({
+    binaryPath: codexSettings.binaryPath,
+    homePath: codexSettings.homePath,
+    launchArgs: resolveCodexLaunchArgs(codexSettings.launchArgs, environment),
+    cwd: process.cwd(),
+    environment,
+  });
+  const { account } = yield* client.request("account/read", {});
+  if (!account) {
+    return { _tag: "NotSignedIn" } satisfies CodexAccountRateLimits;
+  }
+  if (account.type !== "chatgpt") {
+    return {
+      _tag: "NoSubscription",
+      accountType: account.type,
+    } satisfies CodexAccountRateLimits;
+  }
+  const response = yield* client.request("account/rateLimits/read", undefined);
+  return { _tag: "Subscription", response } satisfies CodexAccountRateLimits;
 });
 
 const emptyCodexModelsFromSettings = (codexSettings: CodexSettings): ServerProvider["models"] => {

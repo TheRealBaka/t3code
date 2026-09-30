@@ -3,19 +3,29 @@
  * The `/usage` card: subscription quota first, token and cost totals beneath.
  *
  * The two halves answer different questions and come from different places.
- * Quota is Claude's own account service, read live through the environment, and
+ * Quota is read live through the environment from Claude's account service and
+ * from Codex's app server, one block each whatever the thread's provider, and
  * is the number that decides whether the next turn runs at all. Totals are the
  * Usage page's transcript scan, and say what has been spent. Neither is a
  * substitute for the other, so the card says which is which.
  */
-import { ProviderDriverKind, type ClaudeUsageLimits } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  type ClaudeUsageLimits,
+  type CodexUsageLimits,
+} from "@t3tools/contracts";
 import { RefreshCwIcon } from "lucide-react";
 import { useMemo } from "react";
 
 import { formatTokens, formatUsd, makeWindow } from "@t3tools/shared/usageFormat";
 
 import { cn } from "../../lib/utils";
-import { useClaudeUsageLimits, useUsage, type UsageView } from "../../state/usage";
+import {
+  useClaudeUsageLimits,
+  useCodexUsageLimits,
+  useUsage,
+  type UsageView,
+} from "../../state/usage";
 import { useUsageCardStore, type UsageCardTarget } from "../../usageCardStore";
 import { Button } from "../ui/button";
 import {
@@ -27,48 +37,28 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Spinner } from "../ui/spinner";
-import { formatResetTime, formatUsedPercent } from "./usageLimitsFormat";
+import { formatCodexWindowLabel, formatResetTime, formatUsedPercent } from "./usageLimitsFormat";
 import { PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
 
-/** Only Claude Code reports a subscription quota T3 Code can read. */
-const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
 const PI_DRIVER = ProviderDriverKind.make("piAgent");
 
 /**
- * Whose quota the card should read for a thread. Pi is a harness over other
- * model providers, so its quota belongs to the model provider named by the
- * slug prefix (`anthropic/claude-…`, `openai-codex/gpt-…`), not to Pi.
+ * Pi is a harness over other model providers, so a Pi thread spends the quota
+ * of the model provider named by the slug prefix (`anthropic/claude-…`,
+ * `openai-codex/gpt-…`). Says which of the limits below that is.
  */
-function quotaSourceFor(target: UsageCardTarget): {
-  readonly claude: boolean;
-  readonly note: string | null;
-} {
-  if (target.provider === CLAUDE_DRIVER) return { claude: true, note: null };
-  if (target.provider !== PI_DRIVER) {
-    return {
-      claude: false,
-      note: "This thread is not a Claude thread, so there is no subscription quota to read.",
-    };
-  }
+function piQuotaNote(target: UsageCardTarget): string | null {
+  if (target.provider !== PI_DRIVER) return null;
   const modelProvider = target.model?.split("/")[0]?.trim().toLowerCase() ?? "";
   switch (modelProvider) {
     case "anthropic":
-      return {
-        claude: true,
-        note: "Pi is using Anthropic. Limits are read from the Claude Code sign-in on this machine, which applies when Pi uses the same subscription.",
-      };
+      return "This Pi thread uses Anthropic, so the Claude limits apply when Pi shares Claude Code's subscription.";
     case "openai-codex":
-      return {
-        claude: false,
-        note: "Pi is using your ChatGPT subscription through Codex. T3 Code cannot read that quota yet; token totals are below.",
-      };
+      return "This Pi thread uses your ChatGPT subscription, so the Codex limits apply.";
     case "":
-      return { claude: false, note: "Pick a Pi model to see whose limits apply." };
+      return "Pick a Pi model to see whose limits apply.";
     default:
-      return {
-        claude: false,
-        note: `Pi is using ${modelProvider} with API access, which has no subscription quota to read. Token totals are below.`,
-      };
+      return `This Pi thread uses ${modelProvider} with API access, which has no plan limits. Token totals are below.`;
   }
 }
 
@@ -98,51 +88,35 @@ export function UsageCardDialog() {
 }
 
 function UsageCardBody({ target }: { target: UsageCardTarget }) {
-  const quotaSource = quotaSourceFor(target);
-  const isClaude = quotaSource.claude;
-  const limits = useClaudeUsageLimits(isClaude ? target.environmentId : null);
+  const claudeLimits = useClaudeUsageLimits(target.environmentId);
+  const codexLimits = useCodexUsageLimits(target.environmentId);
   const totalsWindow = useMemo(() => makeWindow(TOTALS_WINDOW_DAYS), []);
   const usage = useUsage(totalsWindow);
 
   const nowMs = Date.now();
-  const quotaRows = limits.data === null ? [] : quotaWindowRows(limits.data);
-  const quotaNote = isClaude ? limits.error : quotaSource.note;
+  const piNote = piQuotaNote(target);
 
   return (
     <DialogPanel className="space-y-5">
-      <section className="space-y-2">
-        <SectionHeading
-          title="Plan limits"
-          detail={
-            limits.data?.subscriptionType
-              ? `Live from Claude · ${limits.data.subscriptionType} plan`
-              : "Live from Claude"
-          }
+      <section className="space-y-4">
+        <SectionHeading title="Plan limits" detail="Live from each provider's sign-in" />
+        {piNote === null ? null : <p className="text-xs text-muted-foreground">{piNote}</p>}
+        <ProviderQuota
+          name="Claude"
+          planType={claudeLimits.data?.subscriptionType ?? null}
+          rows={claudeLimits.data === null ? [] : claudeQuotaRows(claudeLimits.data)}
+          isPending={claudeLimits.isPending}
+          error={claudeLimits.error}
+          nowMs={nowMs}
         />
-        {isClaude && limits.isPending && quotaRows.length === 0 ? (
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner className="size-3.5" />
-            Reading your plan limits...
-          </p>
-        ) : null}
-        {quotaRows.length > 0 ? (
-          <div className="space-y-3">
-            {quotaRows.map((row) => (
-              <QuotaRow key={row.label} row={row} nowMs={nowMs} />
-            ))}
-          </div>
-        ) : null}
-        {quotaRows.length === 0 && quotaNote !== null ? (
-          <p className="text-sm text-muted-foreground">{quotaNote}</p>
-        ) : null}
-        {quotaRows.length > 0 && quotaSource.note !== null ? (
-          <p className="text-xs text-muted-foreground">{quotaSource.note}</p>
-        ) : null}
-        {quotaRows.length === 0 && quotaNote === null && !limits.isPending ? (
-          <p className="text-sm text-muted-foreground">
-            Claude reported no limit windows for this account.
-          </p>
-        ) : null}
+        <ProviderQuota
+          name="Codex"
+          planType={codexLimits.data?.planType ?? null}
+          rows={codexLimits.data === null ? [] : codexQuotaRows(codexLimits.data)}
+          isPending={codexLimits.isPending}
+          error={codexLimits.error}
+          nowMs={nowMs}
+        />
       </section>
 
       <section className="space-y-2">
@@ -165,7 +139,8 @@ function UsageCardBody({ target }: { target: UsageCardTarget }) {
           size="sm"
           variant="outline"
           onClick={() => {
-            limits.refresh();
+            claudeLimits.refresh();
+            codexLimits.refresh();
             usage.refresh();
           }}
         >
@@ -192,11 +167,53 @@ interface QuotaWindowRow {
   readonly resetsAt: string | null;
 }
 
+/** One provider's plan limits: its windows, or why there are none. */
+function ProviderQuota({
+  name,
+  planType,
+  rows,
+  isPending,
+  error,
+  nowMs,
+}: {
+  name: string;
+  planType: string | null;
+  rows: readonly QuotaWindowRow[];
+  isPending: boolean;
+  error: string | null;
+  nowMs: number;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3 text-xs">
+        <span className="font-medium text-foreground">{name}</span>
+        {planType === null ? null : <span className="text-muted-foreground">{planType} plan</span>}
+      </div>
+      {rows.length > 0 ? (
+        <div className="space-y-3">
+          {rows.map((row) => (
+            <QuotaRow key={row.label} row={row} nowMs={nowMs} />
+          ))}
+        </div>
+      ) : isPending ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner className="size-3.5" />
+          Reading your {name} limits...
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {error ?? `${name} reported no limit windows for this account.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * Claude names its windows by key; only the model-scoped ones carry a label the
  * account service picks. Windows the plan does not have are simply absent.
  */
-function quotaWindowRows(limits: ClaudeUsageLimits): readonly QuotaWindowRow[] {
+function claudeQuotaRows(limits: ClaudeUsageLimits): readonly QuotaWindowRow[] {
   const rows: QuotaWindowRow[] = [];
   if (limits.fiveHour) rows.push({ label: "Current session (5h)", ...limits.fiveHour });
   if (limits.sevenDay) rows.push({ label: "Current week (all models)", ...limits.sevenDay });
@@ -209,6 +226,15 @@ function quotaWindowRows(limits: ClaudeUsageLimits): readonly QuotaWindowRow[] {
     });
   }
   return rows;
+}
+
+/** Codex windows are named by their length; see `formatCodexWindowLabel`. */
+function codexQuotaRows(limits: CodexUsageLimits): readonly QuotaWindowRow[] {
+  return limits.windows.map((window) => ({
+    label: formatCodexWindowLabel(window.windowMinutes, window.limitName),
+    usedPercent: window.usedPercent,
+    resetsAt: window.resetsAt,
+  }));
 }
 
 function QuotaRow({ row, nowMs }: { row: QuotaWindowRow; nowMs: number }) {

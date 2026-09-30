@@ -250,6 +250,40 @@ export const ClaudeUsageLimits = Schema.Struct({
 });
 export type ClaudeUsageLimits = typeof ClaudeUsageLimits.Type;
 
+/**
+ * One Codex limit window. Codex reports how long each window is instead of
+ * naming fixed slots: a ChatGPT Plus plan has a 5-hour and a weekly window,
+ * while Pro plans may only have the weekly one.
+ */
+export const CodexUsageWindow = Schema.Struct({
+  usedPercent: Schema.Number,
+  /** Window length in minutes, e.g. 300 for the 5-hour window and 10080 for the weekly one. */
+  windowMinutes: Schema.NullOr(Schema.Number),
+  resetsAt: Schema.NullOr(TrimmedNonEmptyString),
+  /** Set for windows of a named limit other than the account's main one, e.g. a per-model limit. */
+  limitName: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type CodexUsageWindow = typeof CodexUsageWindow.Type;
+
+/** Codex's subscription quota, read live from the Codex app server on demand. */
+export const CodexUsageLimits = Schema.Struct({
+  windows: Schema.Array(CodexUsageWindow),
+  /** ChatGPT plan the signed-in account is on, e.g. `plus` or `pro`. */
+  planType: Schema.NullOr(TrimmedNonEmptyString),
+  fetchedAt: Schema.String,
+});
+export type CodexUsageLimits = typeof CodexUsageLimits.Type;
+
+export class CodexUsageError extends Schema.TaggedErrorClass<CodexUsageError>()("CodexUsageError", {
+  reason: Schema.Literals(["notSignedIn", "unavailable", "requestFailed"]),
+  /** Plain-language and safe to render. */
+  detail: TrimmedNonEmptyString,
+}) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 export class ClaudeUsageError extends Schema.TaggedErrorClass<ClaudeUsageError>()(
   "ClaudeUsageError",
   {

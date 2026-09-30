@@ -1,6 +1,6 @@
 // @effect-diagnostics globalDate:off -- Reset times are wall-clock instants rendered in the viewer's own zone via Intl.
 /**
- * Display formatting for Claude's subscription quota windows.
+ * Display formatting for Claude and Codex subscription quota windows.
  *
  * @module usageLimitsFormat
  */
@@ -41,4 +41,26 @@ export function formatResetTime(resetsAt: string | null, nowMs: number): string 
 /** Whole percents: a quota bar does not earn a decimal place. */
 export function formatUsedPercent(usedPercent: number): string {
   return `${Math.round(usedPercent)}% used`;
+}
+
+/**
+ * Names a Codex window by its length, since Codex does not name them: the
+ * weekly window can arrive where other plans put the 5-hour one. A named
+ * limit other than the account's main one (such as a per-model allowance)
+ * goes in brackets, the way the Claude rows name their model-scoped weeks.
+ */
+export function formatCodexWindowLabel(
+  windowMinutes: number | null,
+  limitName: string | null,
+): string {
+  const scope = limitName === null ? "" : ` (${limitName})`;
+  if (windowMinutes === 300) return `Current session (5h)${scope}`;
+  if (windowMinutes === 10_080) return `Current week${scope}`;
+  if (windowMinutes === null || windowMinutes <= 0) return `Usage window${scope}`;
+  const minutesPerDay = 1_440;
+  if (windowMinutes % minutesPerDay === 0) {
+    return `Current ${windowMinutes / minutesPerDay}-day window${scope}`;
+  }
+  if (windowMinutes % 60 === 0) return `Current ${windowMinutes / 60}-hour window${scope}`;
+  return `Current ${windowMinutes}-minute window${scope}`;
 }

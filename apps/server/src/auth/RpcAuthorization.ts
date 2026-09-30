@@ -47,6 +47,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverRetryResourceTelemetry]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverGetUsageSummary]: AuthOrchestrationReadScope,
   [WS_METHODS.usageGetClaudeLimits]: AuthOrchestrationReadScope,
+  [WS_METHODS.usageGetCodexLimits]: AuthOrchestrationReadScope,
   [WS_METHODS.sideChatAsk]: AuthOrchestrationOperateScope,
   [WS_METHODS.sideChatClose]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverSignalProcess]: AuthOrchestrationOperateScope,

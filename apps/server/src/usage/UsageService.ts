@@ -24,6 +24,8 @@ import {
   type UsageSummaryInput,
   type ClaudeUsageLimits,
   ClaudeUsageError,
+  type CodexUsageLimits,
+  CodexUsageError,
   UsageReadError,
 } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
@@ -39,6 +41,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 import { ServerConfig } from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
@@ -47,6 +50,7 @@ import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
 import { makeClaudeUsageLimitsReader } from "./ClaudeUsageLimits.ts";
+import { makeCodexUsageLimitsReader } from "./CodexUsageLimits.ts";
 import { parseRateTable, type RateTable } from "./usagePricing.ts";
 import {
   listTranscriptFiles,
@@ -105,6 +109,8 @@ export class UsageService extends Context.Service<
      * `readSummary`'s token and cost accounting. See `ClaudeUsageLimits`.
      */
     readonly readClaudeLimits: Effect.Effect<ClaudeUsageLimits, ClaudeUsageError>;
+    /** Codex's subscription quota. See `CodexUsageLimits`. */
+    readonly readCodexLimits: Effect.Effect<CodexUsageLimits, CodexUsageError>;
   }
 >()("t3/usage/UsageService") {}
 
@@ -135,6 +141,12 @@ export const layerTest = Layer.succeed(
         detail: "Claude subscription usage is unavailable in this environment.",
       }),
     ),
+    readCodexLimits: Effect.fail(
+      new CodexUsageError({
+        reason: "unavailable",
+        detail: "Codex subscription usage is unavailable in this environment.",
+      }),
+    ),
   }),
 );
 
@@ -145,6 +157,7 @@ export const make = Effect.gen(function* () {
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const httpClient = yield* HttpClient.HttpClient;
   const hostEnvironment = yield* HostProcessEnvironment;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
   const fileCache: ScanCache = new Map();
   let cacheDirty = false;
@@ -640,7 +653,24 @@ export const make = Effect.gen(function* () {
     return yield* claudeUsageLimits.read(claudeHome);
   });
 
-  return { readSummary, readClaudeLimits } as const;
+  const codexUsageLimits = yield* makeCodexUsageLimitsReader;
+
+  const readCodexLimits = Effect.gen(function* () {
+    const settings = yield* settingsService.getSettings.pipe(
+      Effect.catchCause(
+        () =>
+          new CodexUsageError({
+            reason: "requestFailed",
+            detail: "Server settings could not be read, so the Codex setup is unknown.",
+          }),
+      ),
+    );
+    return yield* codexUsageLimits
+      .read(settings.providers.codex)
+      .pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+  });
+
+  return { readSummary, readClaudeLimits, readCodexLimits } as const;
 });
 
 export const layer = Layer.effect(UsageService, make);

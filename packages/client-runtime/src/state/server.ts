@@ -705,6 +705,12 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.usageGetClaudeLimits,
       staleTimeMs: 30_000,
     }),
+    // The same quota for Codex, read from a short-lived Codex app server.
+    codexUsageLimits: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:codex-usage-limits",
+      tag: WS_METHODS.usageGetCodexLimits,
+      staleTimeMs: 30_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",

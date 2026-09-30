@@ -196,6 +196,8 @@ import {
 import {
   ClaudeUsageError,
   ClaudeUsageLimits,
+  CodexUsageError,
+  CodexUsageLimits,
   UsageReadError,
   UsageSummary,
   UsageSummaryInput,
@@ -302,6 +304,8 @@ export const WS_METHODS = {
   // Claude subscription quota, read live from the account service rather than
   // from transcripts. See `usage.getUsageSummary` for token and cost totals.
   usageGetClaudeLimits: "usage.getClaudeLimits",
+  // Codex subscription quota, read live from the Codex app server.
+  usageGetCodexLimits: "usage.getCodexLimits",
 
   // Side chats (ephemeral forks of a thread's provider conversation)
   sideChatAsk: "sideChat.ask",
@@ -472,6 +476,12 @@ export const WsUsageGetClaudeLimitsRpc = Rpc.make(WS_METHODS.usageGetClaudeLimit
   payload: Schema.Struct({}),
   success: ClaudeUsageLimits,
   error: Schema.Union([EnvironmentAuthorizationError, ClaudeUsageError]),
+});
+
+export const WsUsageGetCodexLimitsRpc = Rpc.make(WS_METHODS.usageGetCodexLimits, {
+  payload: Schema.Struct({}),
+  success: CodexUsageLimits,
+  error: Schema.Union([EnvironmentAuthorizationError, CodexUsageError]),
 });
 
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
@@ -1079,6 +1089,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
   WsUsageGetClaudeLimitsRpc,
+  WsUsageGetCodexLimitsRpc,
   WsServerSignalProcessRpc,
   WsSideChatAskRpc,
   WsSideChatCloseRpc,

@@ -10,6 +10,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   USAGE_CONTRACT_VERSION,
   type ClaudeUsageLimits,
+  type CodexUsageLimits,
   type EnvironmentId,
   type UsageSummary,
   type UsageSummaryInput,
@@ -153,6 +154,20 @@ export function useClaudeUsageLimits(
       environmentId === null
         ? null
         : serverEnvironment.claudeUsageLimits({ environmentId, input: {} }),
+    [environmentId],
+  );
+  return useEnvironmentQuery(atom);
+}
+
+/** Codex's subscription quota for one environment; see `useClaudeUsageLimits`. */
+export function useCodexUsageLimits(
+  environmentId: EnvironmentId | null,
+): EnvironmentQueryView<CodexUsageLimits> {
+  const atom = useMemo(
+    () =>
+      environmentId === null
+        ? null
+        : serverEnvironment.codexUsageLimits({ environmentId, input: {} }),
     [environmentId],
   );
   return useEnvironmentQuery(atom);

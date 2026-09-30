@@ -59,6 +59,7 @@ jobs:
             apps/server/src/provider/pi/PiRpcProtocol.test.ts \
             apps/server/src/sideChat/SideChatCoordinator.test.ts \
             apps/server/src/usage/ClaudeUsageLimits.test.ts \
+            apps/server/src/usage/CodexUsageLimits.test.ts \
             apps/server/src/provider/Drivers/ClaudeSkills.test.ts \
             apps/web/src/components/usage/usageLimitsFormat.test.ts \
             apps/web/src/selectionQuote.test.ts \

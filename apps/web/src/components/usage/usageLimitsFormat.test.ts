@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { formatResetTime, formatUsedPercent } from "./usageLimitsFormat";
+import { formatCodexWindowLabel, formatResetTime, formatUsedPercent } from "./usageLimitsFormat";
 
 const NOW = Date.parse("2026-09-06T01:00:00.000Z");
 const at = (offsetMs: number) => new Date(NOW + offsetMs).toISOString();
@@ -30,5 +30,15 @@ describe("usage limits format", () => {
   it("rounds utilization to whole percents", () => {
     expect(formatUsedPercent(90)).toBe("90% used");
     expect(formatUsedPercent(14.6)).toBe("15% used");
+  });
+
+  it("names Codex windows by their length, whatever slot they came in", () => {
+    expect(formatCodexWindowLabel(300, null)).toBe("Current session (5h)");
+    expect(formatCodexWindowLabel(10_080, null)).toBe("Current week");
+    expect(formatCodexWindowLabel(10_080, "GPT-5 Codex Spark")).toBe(
+      "Current week (GPT-5 Codex Spark)",
+    );
+    expect(formatCodexWindowLabel(2_880, null)).toBe("Current 2-day window");
+    expect(formatCodexWindowLabel(null, null)).toBe("Usage window");
   });
 });

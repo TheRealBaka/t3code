@@ -1760,6 +1760,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.usageGetClaudeLimits, usage.readClaudeLimits, {
             "rpc.aggregate": "usage",
           }),
+        [WS_METHODS.usageGetCodexLimits]: (_input) =>
+          observeRpcEffect(WS_METHODS.usageGetCodexLimits, usage.readCodexLimits, {
+            "rpc.aggregate": "usage",
+          }),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRetryResourceTelemetry, resourceTelemetry.retry, {
             "rpc.aggregate": "server",
