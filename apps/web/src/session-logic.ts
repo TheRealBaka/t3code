@@ -14,6 +14,7 @@ import {
   ProviderRequestKind,
   type ToolLifecycleItemType,
   type UserInputQuestion,
+  type MessageId,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
@@ -1815,6 +1816,35 @@ export function deriveTimelineEntries(
   return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
+}
+
+/**
+ * Places each turn's changed-files summary under the assistant message it
+ * belongs to. The server names that message when it finalizes the checkpoint,
+ * but when the reply lands a moment after the checkpoint (a race in the
+ * checkpoint reactor) it names a placeholder no message has. Those summaries
+ * go to the turn's last assistant message instead, so the diff still shows.
+ */
+export function turnDiffSummariesByAssistantMessageId(
+  summaries: ReadonlyArray<TurnDiffSummary>,
+  messages: ReadonlyArray<Pick<ChatMessage, "id" | "role" | "turnId">>,
+): Map<MessageId, TurnDiffSummary> {
+  const messageIds = new Set<MessageId>();
+  const lastAssistantMessageIdByTurnId = new Map<TurnId, MessageId>();
+  for (const message of messages) {
+    messageIds.add(message.id);
+    if (message.role === "assistant" && message.turnId !== null) {
+      lastAssistantMessageIdByTurnId.set(message.turnId, message.id);
+    }
+  }
+  const byMessageId = new Map<MessageId, TurnDiffSummary>();
+  for (const summary of summaries) {
+    const named = summary.assistantMessageId;
+    const messageId =
+      named && messageIds.has(named) ? named : lastAssistantMessageIdByTurnId.get(summary.turnId);
+    if (messageId) byMessageId.set(messageId, summary);
+  }
+  return byMessageId;
 }
 
 export function inferCheckpointTurnCountByTurnId(

@@ -18,6 +18,7 @@ import {
   findLatestProposedPlan,
   hasActionableProposedPlan,
   isLatestTurnSettled,
+  turnDiffSummariesByAssistantMessageId,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
@@ -2367,5 +2368,39 @@ describe("session activity performance", () => {
       command: "git diff",
       toolLifecycleStatus: "completed",
     });
+  });
+});
+
+describe("turnDiffSummariesByAssistantMessageId", () => {
+  const turnId = TurnId.make("turn-1");
+  const reply = { id: MessageId.make("assistant:item-7"), role: "assistant" as const, turnId };
+  const summary = (assistantMessageId: string | null) => ({
+    turnId,
+    checkpointTurnCount: 1,
+    checkpointRef: "refs/t3/checkpoints/thread/turn/1" as never,
+    status: "ready" as const,
+    files: [{ path: "a.py", kind: "modified", additions: 1, deletions: 0 }],
+    assistantMessageId: assistantMessageId === null ? null : MessageId.make(assistantMessageId),
+    completedAt: "2026-10-05T10:05:28.683Z",
+  });
+
+  it("keeps a summary on the message the server named", () => {
+    const named = summary("assistant:item-7");
+    const byId = turnDiffSummariesByAssistantMessageId([named], [reply]);
+    expect(byId.get(reply.id)).toBe(named);
+  });
+
+  it("moves a summary naming a missing message to the turn's last reply", () => {
+    // The checkpoint finalized before the reply landed and named a placeholder.
+    const placeholder = summary("assistant:turn-1");
+    const earlier = { id: MessageId.make("assistant:item-3"), role: "assistant" as const, turnId };
+    const byId = turnDiffSummariesByAssistantMessageId([placeholder], [earlier, reply]);
+    expect(byId.get(reply.id)).toBe(placeholder);
+    expect(byId.has(earlier.id)).toBe(false);
+  });
+
+  it("leaves a summary out when its turn has no reply", () => {
+    const byId = turnDiffSummariesByAssistantMessageId([summary(null)], []);
+    expect(byId.size).toBe(0);
   });
 });
