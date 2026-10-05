@@ -5,9 +5,8 @@ on:
     tags:
       - "v*.*.*"
       - "!v*-nightly.*"
-  schedule:
-    # Off minute zero: GitHub delays scheduled runs most at the top of the hour.
-    - cron: "38 */3 * * *"
+  # T3 Code++ ships from preview-release.yml. The upstream nightly schedule is
+  # off here: on this fork it only queued runs that never start.
   workflow_dispatch:
     inputs:
       channel:
